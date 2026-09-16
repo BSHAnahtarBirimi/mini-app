@@ -5,12 +5,10 @@
 	"type": "module",
 	"main": "api/interactions.ts",
 	"scripts": {
-		"build": "echo 'No build step: serverless functions in api/ are compiled by Vercel'",
+		"build": "tsc --noEmit",
 		"mi-latest": "npm i @minesa-org/mini-interaction@latest",
 		"register": "tsx scripts/register.ts",
-		"typecheck": "tsc --noEmit",
-		"cf:dev": "wrangler dev",
-		"cf:deploy": "wrangler deploy"
+		"typecheck": "tsc --noEmit"
 	},
 	"keywords": [
 		"discord",
@@ -28,7 +26,6 @@
 	"devDependencies": {
 		"@types/node": "^24.10.0",
 		"tsx": "^4.20.6",
-		"typescript": "^5.9.3",
-		"wrangler": "^3.0.0"
+		"typescript": "^5.9.3"
 	}
 }
