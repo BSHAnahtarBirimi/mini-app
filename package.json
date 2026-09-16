@@ -1,58 +1,33 @@
 {
-  "name": "@minesa-org/mini-interaction",
-  "version": "0.11.0",
-  "description": "Mini interaction, connecting your app with Discord via HTTP-interaction (Vercel + Cloudflare Workers support).",
-  "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "files": [
-    "dist",
-    "README.md",
-    "LICENSE"
-  ],
-  "scripts": {
-    "build": "tsc --project tsconfig.json",
-    "postbuild": "tsx scripts/postbuild.ts",
-    "typecheck": "tsc --noEmit",
-    "prepare": "npm run build",
-    "patch": "npm version patch",
-    "publish:npm": "npm publish",
-    "publish:gh": "npm publish --registry=https://npm.pkg.github.com",
-    "test": "tsx --test $(find src -name '*.test.ts' -type f)",
-    "lint:type": "tsc --noEmit"
-  },
-  "publishConfig": {
-    "access": "public"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/minesa-org/mini-interaction.git"
-  },
-  "keywords": [
-    "discord",
-    "interactions",
-    "http-interaction",
-    "vercel",
-    "cloudflare-workers",
-    "typescript"
-  ],
-  "author": "Minesa",
-  "license": "MIT",
-  "bugs": {
-    "url": "https://github.com/minesa-org/mini-interaction/issues"
-  },
-  "homepage": "https://github.com/minesa-org/mini-interaction#readme",
-  "dependencies": {
-    "@vercel/functions": "^1.6.0",
-    "discord-api-types": "^0.38.32",
-    "discord-interactions": "^4.4.0",
-    "dotenv": "^17.2.3",
-    "mongodb": "^7.0.0"
-  },
-  "devDependencies": {
-    "@types/node": "^24.10.0",
-    "ts-node": "^10.9.2",
-    "tsx": "^4.20.6",
-    "typescript": "^5.9.3"
-  }
+	"name": "@minesa-org/mini-app",
+	"version": "2.0.0",
+	"description": "Mini-Interaction <3 — app template on the modular router stack.",
+	"type": "module",
+	"main": "api/interactions.ts",
+	"scripts": {
+		"mi-latest": "npm i @minesa-org/mini-interaction@latest",
+		"register": "tsx scripts/register.ts",
+		"typecheck": "tsc --noEmit",
+		"cf:dev": "wrangler dev",
+		"cf:deploy": "wrangler deploy"
+	},
+	"keywords": [
+		"discord",
+		"app",
+		"template",
+		"http-interaction"
+	],
+	"author": "Minesa",
+	"license": "MIT",
+	"dependencies": {
+		"@minesa-org/mini-interaction": "^0.9.0",
+		"dotenv": "^17.2.3",
+		"mongodb": "^7.0.0"
+	},
+	"devDependencies": {
+		"@types/node": "^24.10.0",
+		"tsx": "^4.20.6",
+		"typescript": "^5.9.3",
+		"wrangler": "^3.0.0"
+	}
 }
