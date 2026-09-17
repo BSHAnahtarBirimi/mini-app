@@ -1,16 +1,26 @@
 import type { ModalHandler } from "@minesa-org/mini-interaction";
 
-/** `ping_modal` — reads the submitted select-menu values from the modal. */
+/** `ping_modal` — reads every submitted modal component and summarizes them. */
 export const pingModal = {
 	customId: "ping_modal",
 
 	handler: (async (interaction) => {
-		const values = interaction.getSelectMenuValues("ping_menu_modal") ?? [];
+		const radio = interaction.getRadioGroupValue("ping_radio");
+		const checkboxes = interaction.getCheckboxGroupValues("ping_checkboxes");
+		const wantsFollowUp = interaction.getCheckboxValue("ping_followup");
+		const notes = interaction.getTextFieldValue("ping_notes");
+		const attachments = interaction.getFileUploadValues("ping_upload");
+
+		const lines = [
+			`**📻 Radio group:** ${radio ?? "—"}`,
+			`**☑️ Checkbox group:** ${checkboxes.length ? checkboxes.join(", ") : "—"}`,
+			`**🔘 Single checkbox:** ${wantsFollowUp ? "Yes" : "No"}`,
+			`**📝 Notes:** ${notes?.trim() ? notes : "—"}`,
+			`**📎 File upload:** ${attachments.length ? `${attachments.length} file(s)` : "—"}`,
+		];
 
 		return interaction.reply({
-			content: values.length
-				? `You selected: ${values.join(", ")}`
-				: "You didn't select anything.",
+			content: `**Modal showcase results**\n${lines.join("\n")}`,
 		});
 	}) satisfies ModalHandler,
 };
