@@ -1,6 +1,6 @@
 {
 	"name": "@minesa-org/mini-app",
-	"version": "2.0.0",
+	"version": "2.0.1",
 	"description": "Mini-Interaction <3 — app template on the modular router stack.",
 	"type": "module",
 	"main": "api/interactions.ts",
