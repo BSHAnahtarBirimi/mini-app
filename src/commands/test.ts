@@ -1,7 +1,7 @@
 import { CommandBuilder, MessageFlags } from "@minesa-org/mini-interaction";
 import type { APIContainerComponent } from "discord-api-types/v10";
 import type { SlashCommandHandler } from "@minesa-org/mini-interaction";
-import { buildShowcaseContainer } from "../components/test_showcase_container.js";
+import { buildShowcaseContainer } from "../components/test_showcase_container.ts";
 
 /** `/test` — Components V2 showcase with modal buttons and response-mode select menus. */
 export const testCommand = {

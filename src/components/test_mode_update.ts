@@ -1,6 +1,6 @@
 import type { APIContainerComponent } from "discord-api-types/v10";
 import type { ComponentHandler } from "@minesa-org/mini-interaction";
-import { buildShowcaseContainer } from "./test_showcase_container.js";
+import { buildShowcaseContainer } from "./test_showcase_container.ts";
 
 /** `test_mode_update` — string select that updates the message in place. */
 export const modeUpdateSelect = {
