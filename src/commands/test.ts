@@ -21,13 +21,17 @@ export const testCommand = {
 			.addComponent(
 				new TextDisplayBuilder().setContent(
 					[
-						"## 🧪 Mini-Interaction Showcase",
-						"Each button below opens a modal demoing a set of modal features.",
-						"",
-						"- **📻 Inputs** — radio group, checkbox group, single checkbox",
-						"- **📝 Text & Select** — text input, string select menu",
-						"- **👥 Resolved** — user & role select menus (resolved data)",
-						"- **📎 Upload** — file upload + attachment preview",
+					"## 🧪 Mini-Interaction Showcase",
+					"Each button below opens a modal demoing a set of modal features.",
+					"",
+					"- **📻 Inputs** — radio group, checkbox group, single checkbox",
+					"- **📝 Text & Select** — text input, string select menu",
+					"- **👥 Resolved** — user & role select menus (resolved data)",
+					"- **📎 Upload** — file upload + attachment preview",
+					"",
+					"-# ℹ️ Inputs & Upload use Discord's newest modal components " +
+						"(Radio/Checkbox/File Upload). Some clients — notably the web app — " +
+						"may not render them yet. Try the desktop or mobile app if a modal fails.",
 					].join("\n"),
 				),
 			)
