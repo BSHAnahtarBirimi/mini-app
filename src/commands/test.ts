@@ -82,17 +82,33 @@ export const testCommand = {
 			),
 		);
 
-		// 6. Spoiler text block (Discord masks spoiler-marked content in Components V2).
+		// 6. Section with a BUTTON accessory — clicking it opens the text & select modal.
+		container.addComponent(
+			new SectionBuilder()
+				.addComponent(
+					new TextDisplayBuilder().setContent(
+						"**✨ Accessory button section** — this section's accessory is a button, not a thumbnail.",
+					),
+				)
+				.setAccessory(
+					new ButtonBuilder()
+						.setCustomId("test_showcase_text_select")
+						.setLabel("Try a modal")
+						.setStyle(ButtonStyle.Secondary),
+				),
+		);
+
+		// 7. Spoiler text block (Discord masks spoiler-marked content in Components V2).
 		container.addComponent(
 			new TextDisplayBuilder().setContent("||🤫 Bonus: this text is wrapped in spoiler markup.||"),
 		);
 
-		// 7. Separator.
+		// 8. Separator.
 		container.addComponent(
 			new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true),
 		);
 
-		// 8. Action rows: 4 modal buttons + 1 link button.
+		// 9. Action rows: 4 modal buttons + 1 link button.
 		container.addComponent({
 			type: 1,
 			components: [
