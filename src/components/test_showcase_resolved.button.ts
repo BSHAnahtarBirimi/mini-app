@@ -34,7 +34,8 @@ export const showcaseResolvedButton = {
 							.setCustomId("sc_role")
 							.setPlaceholder("Select a role")
 							.setMinValues(0)
-							.setMaxValues(2),
+							.setMaxValues(2)
+							.setRequired(false),
 					),
 			);
 

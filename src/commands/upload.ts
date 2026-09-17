@@ -11,7 +11,7 @@ export const uploadCommand = {
 			.setTitle("Upload Test")
 			.addComponents(
 				new LabelBuilder().setLabel("Attach a file").setComponent(
-					new FileUploadBuilder().setCustomId("file_choice").setMinValues(0).setMaxValues(1),
+					new FileUploadBuilder().setCustomId("file_choice").setMinValues(0).setMaxValues(1).setRequired(false),
 				),
 			);
 

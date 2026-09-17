@@ -17,7 +17,8 @@ export const showcaseUploadButton = {
 						new FileUploadBuilder()
 							.setCustomId("sc_upload")
 							.setMinValues(0)
-							.setMaxValues(3),
+							.setMaxValues(3)
+							.setRequired(false),
 					),
 			);
 

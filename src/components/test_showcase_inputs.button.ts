@@ -49,6 +49,7 @@ export const showcaseInputsButton = {
 							.setCustomId("sc_checkboxes")
 							.setMinValues(0)
 							.setMaxValues(3)
+							.setRequired(false)
 							.addOptions(
 								{ label: "Modals", value: "modals" },
 								{ label: "Components V2", value: "components_v2" },

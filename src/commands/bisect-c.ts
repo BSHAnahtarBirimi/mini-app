@@ -15,6 +15,7 @@ export const checkboxCommand = {
 						.setCustomId("cb_group")
 						.setMinValues(0)
 						.setMaxValues(2)
+						.setRequired(false)
 						.addOptions(
 							{ label: "One", value: "1" },
 							{ label: "Two", value: "2" },
