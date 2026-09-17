@@ -1,66 +1,41 @@
 import {
-	CheckboxBuilder,
-	CheckboxGroupBuilder,
 	LabelBuilder,
 	ModalBuilder,
-	RadioBuilder,
+	TextInputBuilder,
+	TextInputStyle,
 } from "@minesa-org/mini-interaction";
 import type { ComponentHandler } from "@minesa-org/mini-interaction";
 
-/** `test_showcase_inputs` — opens a modal with radio group, checkbox group and single checkbox. */
+/** `test_showcase_inputs` — opens a modal with paragraph + short text inputs. */
 export const showcaseInputsButton = {
 	customId: "test_showcase_inputs",
 
 	handler: (async (interaction) => {
 		const modal = new ModalBuilder()
 			.setCustomId("test_showcase_inputs_modal")
-			.setTitle("Showcase: Inputs")
+			.setTitle("Showcase: Text Inputs")
 			.addComponents(
 				new LabelBuilder()
-					.setLabel("Favorite feature")
-					.setDescription("Radio group (type 21) — single choice")
+					.setLabel("Short input")
+					.setDescription("TextInputStyle.Short — single line, max 50 chars")
 					.setComponent(
-						new RadioBuilder()
-							.setCustomId("sc_radio")
+						new TextInputBuilder()
+							.setCustomId("sc_short")
+							.setStyle(TextInputStyle.Short)
 							.setRequired(true)
-							.addOptions(
-								{
-									label: "Radio Group",
-									value: "radio_group",
-									description: "Single choice, 2-10 options",
-								},
-								{
-									label: "Checkbox Group",
-									value: "checkbox_group",
-									description: "Multi-select in modals",
-								},
-								{
-									label: "File Upload",
-									value: "file_upload",
-									description: "Attach files from a modal",
-								},
-							),
+							.setMaxLength(50)
+							.setPlaceholder("Single-line text..."),
 					),
 				new LabelBuilder()
-					.setLabel("Extras you want")
-					.setDescription("Checkbox group (type 22) — multi-select")
+					.setLabel("Paragraph input")
+					.setDescription("TextInputStyle.Paragraph — multi-line, max 300 chars")
 					.setComponent(
-						new CheckboxGroupBuilder()
-							.setCustomId("sc_checkboxes")
-							.setMinValues(0)
-							.setMaxValues(3)
+						new TextInputBuilder()
+							.setCustomId("sc_paragraph")
+							.setStyle(TextInputStyle.Paragraph)
 							.setRequired(false)
-							.addOptions(
-								{ label: "Modals", value: "modals" },
-								{ label: "Components V2", value: "components_v2" },
-								{ label: "Deferred replies", value: "deferred" },
-							),
-					),
-				new LabelBuilder()
-					.setLabel("Send me a follow-up")
-					.setDescription("Single checkbox (type 23)")
-					.setComponent(
-						new CheckboxBuilder().setCustomId("sc_followup").setDefault(false),
+							.setMaxLength(300)
+							.setPlaceholder("Multi-line text..."),
 					),
 			);
 
