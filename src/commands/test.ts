@@ -17,8 +17,7 @@ import type { SlashCommandHandler } from "@minesa-org/mini-interaction";
 const button = (customId: string, label: string) =>
 	new ButtonBuilder().setCustomId(customId).setLabel(label).setStyle(ButtonStyle.Primary);
 
-const HERO_IMAGE =
-	"https://cdn.discordapp.com/attachments/1254153896198537216/1416368210605555774/mini-interaction.png";
+const HERO_IMAGE = "https://cdn.discordapp.com/embed/avatars/0.png";
 
 /** `/test` — full Components V2 + modal feature showcase. */
 export const testCommand = {
@@ -58,7 +57,9 @@ export const testCommand = {
 					new GalleryItemBuilder().setMedia({ url: HERO_IMAGE }).setDescription("Gallery item 1"),
 				)
 				.addItem(
-					new GalleryItemBuilder().setMedia({ url: HERO_IMAGE }).setDescription("Gallery item 2"),
+					new GalleryItemBuilder()
+						.setMedia({ url: "https://cdn.discordapp.com/embed/avatars/1.png" })
+						.setDescription("Gallery item 2"),
 				),
 		);
 
