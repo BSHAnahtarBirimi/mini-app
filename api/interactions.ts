@@ -4,6 +4,9 @@ export const mini = new MiniInteraction({
 	commandsDirectory: "src/commands",
 	componentsDirectory: "src/components",
 	debug: true,
+	// Guard against accidental whitespace/newlines in the env var, which make
+	// ed25519 verification fail with "invalid interaction signature".
+	publicKey: process.env.DISCORD_PUBLIC_KEY?.trim(),
 });
 
 type LoadedModules = { commands: unknown[]; components: unknown[]; modals: unknown[] };
