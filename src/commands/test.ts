@@ -21,17 +21,17 @@ export const testCommand = {
 			.addComponent(
 				new TextDisplayBuilder().setContent(
 					[
-					"## 🧪 Mini-Interaction Showcase",
-					"Each button below opens a modal demoing a set of modal features.",
-					"",
-					"- **📻 Inputs** — radio group, checkbox group, single checkbox",
-					"- **📝 Text & Select** — text input, string select menu",
-					"- **👥 Resolved** — user & role select menus (resolved data)",
-					"- **📎 Upload** — file upload + attachment preview",
-					"",
-					"-# ℹ️ Inputs & Upload use Discord's newest modal components " +
-						"(Radio/Checkbox/File Upload). Some clients — notably the web app — " +
-						"may not render them yet. Try the desktop or mobile app if a modal fails.",
+						"## 🧪 Mini-Interaction Showcase",
+						"Each button below opens a modal demoing a set of modal features.",
+						"",
+						"- **🧱 Legacy** — ActionRow + TextInput (no Label, deprecated but classic)",
+						"- **📻 Inputs** — radio group, checkbox group, single checkbox (in Labels)",
+						"- **📝 Text & Select** — text input, string select menu (in Labels)",
+						"- **👥 Resolved** — user & role select menus (in Labels)",
+						"- **📎 Upload** — file upload + attachment preview (in Labels)",
+						"",
+						"-# ℹ️ Inputs, Upload & Resolved use newer modal components. Some clients " +
+							"(notably the web app) may not render them yet — try desktop/mobile.",
 					].join("\n"),
 				),
 			)
@@ -43,13 +43,14 @@ export const testCommand = {
 			.addComponent({
 				type: 1,
 				components: [
+					button("test_showcase_legacy", "🧱 Legacy").toJSON(),
 					button("test_showcase_inputs", "📻 Inputs").toJSON(),
-					button("test_showcase_text_select", "📝 Text & Select").toJSON(),
 				],
 			})
 			.addComponent({
 				type: 1,
 				components: [
+					button("test_showcase_text_select", "📝 Text & Select").toJSON(),
 					button("test_showcase_resolved", "👥 Resolved").toJSON(),
 					button("test_showcase_upload", "📎 Upload").toJSON(),
 				],
