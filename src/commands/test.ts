@@ -54,7 +54,7 @@ export const testCommand = {
 				.setAccessory(
 					new ButtonBuilder()
 						.setStyle(ButtonStyle.Secondary)
-						.setCustomId("test_showcase_inputs")
+						.setCustomId("test_accessory_button")
 						.setLabel("Try a modal"),
 				),
 		);
