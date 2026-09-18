@@ -1,4 +1,4 @@
-# Mini App Template (mini-interaction ≥ 0.9)
+# Mini App Template (mini-interaction ≥ 0.14)
 
 Starter template for Discord HTTP-interaction apps built on **auto-discovery**:
 drop handler files into convention directories and `MiniInteraction` picks them
@@ -20,7 +20,7 @@ endpoint file.
 | `src/utils/database.ts` | Shared `MiniDatabase` instance + helpers |
 | `src/commands/linked-channel.ts` | `/linked-channel` — Linked Channels admin panel |
 | `src/components/lc_*.ts` | Linked Channels flow components (`lc:link`, `lc:pick`, `lc:confirm`, `lc:cancel`, `lc:unlink`, `lc:join`) |
-| `src/utils/lobby-api.ts` | Discord Lobby HTTP API client (channel linking/unlinking, invites) |
+| `src/utils/lobby-api.ts` | Lobby API wrappers over the package's `DiscordRestClient` (fail-fast: `maxRetries: 0`) |
 | `src/utils/lobby-store.ts` | Per-guild lobby records on `MiniDatabase` (`lc:${guildId}`) |
 | `src/utils/channel-privacy.ts` | Pure privacy classifier for `permission_overwrites` |
 | `scripts/register.ts` | Auto-discovers and registers commands + linked-role metadata |
@@ -137,6 +137,17 @@ Lobby API (see `docs.discord.com/developers/resources/lobby`):
   user and never retried in a loop.
 
 Run the pure-logic tests with `npm test`.
+
+### Package version note
+
+Built on `@minesa-org/mini-interaction` **v0.14.0**, which ships the full Lobby
+surface (`LobbyMemberFlags`, `linkChannelToLobby`, `unlinkChannelFromLobby`,
+`createLobbyChannelInviteForSelf`, `OAuth2Builder`). v0.14.0 is published as a
+GitHub release/tag only — npm still serves 0.9.0 — so the dependency is pinned
+via git (`github:minesa-org/mini-interaction#v0.14.0`) with a lockfile
+resolution over anonymous HTTPS so CI's `npm ci` works without credentials.
+`src/utils/lobby-api.ts` wraps the package's `DiscordRestClient` with
+`maxRetries: 0` so a rate-limited link fails fast instead of retrying.
 
 ## Environment variables
 
