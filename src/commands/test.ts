@@ -43,12 +43,26 @@ export const testCommand = {
 				),
 		);
 
-		// 2. Separator.
+		// 2. Section with button accessory.
+		container.addComponent(
+			new SectionBuilder()
+				.addComponent(
+					new TextDisplayBuilder().setContent(
+						"✨ **Accessory button section** — this section's accessory is a button, not a thumbnail.",
+					),
+				)
+				.setAccessory(
+					new ButtonBuilder()
+						.setStyle(ButtonStyle.Secondary)
+						.setCustomId("test_showcase_inputs")
+						.setLabel("Try a modal"),
+				),
+		);
+
+		// 3. Separator.
 		container.addComponent(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Large).setDivider(true));
 
-		// 3. Response-mode select menus, each inside its own ActionRow
-		//    (container children may only be: Action Row, Text Display,
-		//    Section, Media Gallery, Separator, File).
+		// 4. Separator.
 		container.addComponent(
 			new TextDisplayBuilder().setContent("### 🎛️ Response modes\nPick a menu — each one responds differently:"),
 		);
@@ -92,10 +106,10 @@ export const testCommand = {
 			),
 		);
 
-		// 4. Separator.
+		// 5. Separator.
 		container.addComponent(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true));
 
-		// 5. Feature list.
+		// 6. Feature list.
 		container.addComponent(
 			new TextDisplayBuilder().setContent(
 				[
@@ -109,13 +123,13 @@ export const testCommand = {
 			),
 		);
 
-		// 6. Spoiler text block.
+		// 7. Spoiler text block.
 		container.addComponent(new TextDisplayBuilder().setContent("||🤫 Bonus: spoiler-marked text block.||"));
 
-		// 7. Separator.
+		// 8. Separator.
 		container.addComponent(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true));
 
-		// 8. Member / role / channel select menus (message variants) in ActionRows.
+		// 9. Member / role / channel select menus (message variants) in ActionRows.
 		container.addComponent(				new ActionRowBuilder<MessageActionRowComponent>().addComponents({
 					type: 5,
 					custom_id: "test_member_select",
