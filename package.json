@@ -8,7 +8,8 @@
 		"build": "tsc --noEmit",
 		"mi-latest": "npm i @minesa-org/mini-interaction@latest",
 		"register": "tsx scripts/register.ts",
-		"typecheck": "tsc --noEmit"
+		"typecheck": "tsc --noEmit",
+		"test": "tsx --test $(find src -name '*.test.ts' -type f)"
 	},
 	"keywords": [
 		"discord",

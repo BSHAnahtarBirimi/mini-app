@@ -18,6 +18,11 @@ endpoint file.
 | `src/components/ping_menu.ts` | Select menu component handler |
 | `src/modals/ping_modal.ts` | Modal submit handler |
 | `src/utils/database.ts` | Shared `MiniDatabase` instance + helpers |
+| `src/commands/linked-channel.ts` | `/linked-channel` — Linked Channels admin panel |
+| `src/components/lc_*.ts` | Linked Channels flow components (`lc:link`, `lc:pick`, `lc:confirm`, `lc:cancel`, `lc:unlink`, `lc:join`) |
+| `src/utils/lobby-api.ts` | Discord Lobby HTTP API client (channel linking/unlinking, invites) |
+| `src/utils/lobby-store.ts` | Per-guild lobby records on `MiniDatabase` (`lc:${guildId}`) |
+| `src/utils/channel-privacy.ts` | Pure privacy classifier for `permission_overwrites` |
 | `scripts/register.ts` | Auto-discovers and registers commands + linked-role metadata |
 
 ## 1. Prepare
@@ -106,6 +111,32 @@ That's it — `MiniInteraction` auto-discovers all files in `src/commands/`,
 | Command | `interaction.options.getString()`, `.getUser()`, `.getInteger()`, etc. | `interaction.reply()`, `interaction.deferReply()`, `interaction.editReply()`, `interaction.followUp()` |
 | Component | `interaction.getStringValues()`, `interaction.getUser()`, `interaction.showModal()` | `interaction.reply()`, `interaction.deferReply()` |
 | Modal | `interaction.getTextFieldValue()`, `interaction.getSelectMenuValues()`, `interaction.getRadioGroupValue()` | `interaction.reply()` |
+
+## Linked Channels (`/linked-channel`)
+
+Example implementation of Discord Social SDK **Linked Channels** over the HTTP
+Lobby API (see `docs.discord.com/developers/resources/lobby`):
+
+- The panel auto-creates a per-guild lobby with the invoking admin as a member
+  carrying `CanLinkLobby` (`1 << 0`) — without that flag nobody can link **or**
+  unlink. The lobby id is persisted in `MiniDatabase` as `lc:${guildId}`.
+- **Link a channel** fetches the guild's text channels with the bot token and
+  shows a labelled `StringSelect` (Discord channel select menus have no
+  per-option labels, so privacy badges are computed from
+  `permission_overwrites` by `src/utils/channel-privacy.ts`).
+- **Every pick shows a warning step**: all lobby members will be able to read
+  and post in the channel from inside the game, even members who cannot see it
+  in Discord, and any lobby member can generate a server invite that server
+  admins cannot restrict. Linking only proceeds after "Link anyway".
+- Linking/unlinking/invites require a **user** OAuth2 Bearer token with the
+  `openid sdk.social_layer` scope. That scope is limited access — apps must be
+  accepted into Discord's Social SDK communication-features program. When a
+  stored token lacks it, the panel shows a **Reconnect Discord** button built
+  with those scopes. While the app is unapproved, channel linking is capped at
+  **20 calls per 2 hours per application** — failed links are shown to the
+  user and never retried in a loop.
+
+Run the pure-logic tests with `npm test`.
 
 ## Environment variables
 
