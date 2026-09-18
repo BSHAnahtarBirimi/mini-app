@@ -5,7 +5,7 @@ import { db } from "../utils/database.js";
 import { getLobbyRecord, deleteLobbyRecord } from "../utils/lobby-store.js";
 import { getStoredUserToken } from "../utils/lobby-tokens.js";
 import { hasSocialLayerScope } from "../utils/lobby-oauth.js";
-import { unlinkChannelFromLobby, LobbyApiError } from "../utils/lobby-api.js";
+import { unlinkChannelFromLobby, describeLobbyError, DiscordRestApiError } from "../utils/lobby-api.js";
 
 /**
  * `lc:unlink` — removes the channel link from the guild's lobby.
@@ -60,12 +60,12 @@ export const unlinkButton = {
 				flags: MessageFlags.Ephemeral,
 			});
 		} catch (error) {
-			if (error instanceof LobbyApiError) {
-				console.error("[lc:unlink] unlink failed:", error.status, error.code, error.message);
+			if (error instanceof DiscordRestApiError) {
+				console.error("[lc:unlink] unlink failed:", error.status, error.body);
 				return interaction.reply({
 					content: [
 						"❌ **Discord rejected the unlink.**",
-						`• ${error.message}`,
+						`• ${describeLobbyError(error)}`,
 						"",
 						"Common causes: missing `sdk.social_layer` scope, missing CanLinkLobby lobby flag, no link present, or the development cap of **20 calls per 2 hours** being exhausted. The request was **not** retried.",
 					].join("\n"),

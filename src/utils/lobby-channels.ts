@@ -3,11 +3,11 @@
  *
  * Discord's channel select menus carry no per-option labels, so there is no
  * way to mark individual channels as private inside a native channel select.
- * Instead we fetch the guild's channels with the BOT token (GET
- * /guilds/{id}/channels), keep the linkable text channels, and build a
- * StringSelect whose labels/classifications are computed via
+ * Instead we fetch the guild's channels with the BOT token
+ * (`DiscordRestClient.listGuildChannels`), keep the linkable text channels,
+ * and build a StringSelect whose labels/classifications are computed via
  * classifyChannelPrivacy(). The post-selection warning step stays as the
- * authoritative safety net ("warn unless provably public").
+ * safety net ("warn unless provably public").
  */
 
 import { ChannelType } from "@minesa-org/mini-interaction";
@@ -15,7 +15,14 @@ import { ChannelType } from "@minesa-org/mini-interaction";
 import { classifyChannelPrivacy } from "./channel-privacy.js";
 import type { ChannelPrivacy } from "./channel-privacy.js";
 import { listGuildChannels } from "./lobby-api.js";
-import type { GuildChannel } from "./lobby-api.js";
+
+/** Minimal structural shape of the guild channel payload we classify. */
+export type ClassifiableGuildChannel = {
+	id: string;
+	name?: string;
+	type: number;
+	permission_overwrites?: Parameters<typeof classifyChannelPrivacy>[0];
+};
 
 /** Discord caps select menus at 25 options; leave room for the hint entry. */
 export const MAX_MENU_CHANNELS = 24;
@@ -31,7 +38,8 @@ export async function listGuildChannelsForMenu(
 	guildId: string,
 	botToken: string,
 ): Promise<ClassifiedChannel[]> {
-	const channels = await listGuildChannels(guildId, botToken);
+	void botToken; // auth is handled centrally by DiscordRestClient
+	const channels = await listGuildChannels(guildId);
 
 	return channels
 		.filter((channel) => channel.type === ChannelType.GuildText)
@@ -63,5 +71,3 @@ export function buildChannelMenuOptions(channels: ClassifiedChannel[]): {
 					: "Privacy unknown — a warning will be shown",
 	}));
 }
-
-export type { GuildChannel };

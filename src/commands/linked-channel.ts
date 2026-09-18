@@ -4,6 +4,7 @@ import {
 	ButtonStyle,
 	CommandBuilder,
 	ContainerBuilder,
+	LobbyMemberFlags,
 	MessageFlags,
 	SectionBuilder,
 	SeparatorBuilder,
@@ -15,7 +16,7 @@ import type { SlashCommandHandler } from "@minesa-org/mini-interaction";
 
 import { db } from "../utils/database.js";
 import { getLobbyRecord, setLobbyRecord, deleteLobbyRecord } from "../utils/lobby-store.js";
-import { createLobby, LobbyMemberFlags } from "../utils/lobby-api.js";
+import { createLobby } from "../utils/lobby-api.js";
 import { hasSocialLayerScope, buildSocialSdkOAuthUrl } from "../utils/lobby-oauth.js";
 import { getStoredUserToken } from "../utils/lobby-tokens.js";
 
@@ -65,7 +66,7 @@ export const linkedChannelCommand = {
 				});
 			}
 			try {
-				const lobby = await createLobby(botToken, applicationId, [
+				const lobby = await createLobby([
 					{ id: userId, flags: LobbyMemberFlags.CanLinkLobby },
 				]);
 				record = {

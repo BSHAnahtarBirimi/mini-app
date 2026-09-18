@@ -6,7 +6,7 @@
 	"main": "api/interactions.ts",
 	"scripts": {
 		"build": "tsc --noEmit",
-		"mi-latest": "npm i @minesa-org/mini-interaction@latest",
+		"mi-latest": "npm i \"git+https://github.com/minesa-org/mini-interaction.git#v0.14.0\"",
 		"register": "tsx scripts/register.ts",
 		"typecheck": "tsc --noEmit",
 		"test": "tsx --test $(find src -name '*.test.ts' -type f)"
@@ -20,7 +20,7 @@
 	"author": "Minesa",
 	"license": "MIT",
 	"dependencies": {
-		"@minesa-org/mini-interaction": "^0.9.0",
+		"@minesa-org/mini-interaction": "github:minesa-org/mini-interaction#v0.14.0",
 		"dotenv": "^17.2.3",
 		"mongodb": "^7.0.0"
 	},

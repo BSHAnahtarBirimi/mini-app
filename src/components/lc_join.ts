@@ -5,7 +5,7 @@ import { db } from "../utils/database.js";
 import { getLobbyRecord } from "../utils/lobby-store.js";
 import { getStoredUserToken } from "../utils/lobby-tokens.js";
 import { hasSocialLayerScope } from "../utils/lobby-oauth.js";
-import { createLobbyChannelInviteForSelf, LobbyApiError } from "../utils/lobby-api.js";
+import { createLobbyChannelInviteForSelf, describeLobbyError, DiscordRestApiError } from "../utils/lobby-api.js";
 
 /**
  * `lc:join` — "Join Discord server" button.
@@ -68,12 +68,12 @@ export const joinServerButton = {
 				flags: MessageFlags.Ephemeral,
 			});
 		} catch (error) {
-			if (error instanceof LobbyApiError) {
-				console.error("[lc:join] invite failed:", error.status, error.code, error.message);
+			if (error instanceof DiscordRestApiError) {
+				console.error("[lc:join] invite failed:", error.status, error.body);
 				return interaction.reply({
 					content: [
 						"❌ **Could not create an invite.**",
-						`• ${error.message}`,
+						`• ${describeLobbyError(error)}`,
 						"",
 						"The lobby must have a linked channel and you must be one of its members.",
 					].join("\n"),

@@ -6,7 +6,7 @@ import { getLobbyRecord } from "../utils/lobby-store.js";
 import { getPendingLink } from "../utils/linked-channel-state.js";
 import { getStoredUserToken } from "../utils/lobby-tokens.js";
 import { hasSocialLayerScope } from "../utils/lobby-oauth.js";
-import { linkChannelToLobby, LobbyApiError } from "../utils/lobby-api.js";
+import { linkChannelToLobby, describeLobbyError, DiscordRestApiError } from "../utils/lobby-api.js";
 
 /**
  * `lc:confirm` — performs the actual channel link after the warning step.
@@ -83,12 +83,12 @@ export const confirmLinkButton = {
 				flags: MessageFlags.Ephemeral,
 			});
 		} catch (error) {
-			if (error instanceof LobbyApiError) {
-				console.error("[lc:confirm] link failed:", error.status, error.code, error.message);
+			if (error instanceof DiscordRestApiError) {
+				console.error("[lc:confirm] link failed:", error.status, error.body);
 				return interaction.reply({
 					content: [
 						"❌ **Discord rejected the link.**",
-						`• ${error.message}`,
+						`• ${describeLobbyError(error)}`,
 						"",
 						"Common causes: missing `sdk.social_layer` scope on your connection, missing CanLinkLobby lobby flag, lacking Manage Channels / View / Send permissions on the channel, the channel being already linked, or the development cap of **20 link calls per 2 hours** being exhausted. The request was **not** retried.",
 					].join("\n"),
