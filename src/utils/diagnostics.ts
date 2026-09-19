@@ -103,8 +103,11 @@ export function deriveProblems(input: DiagInput): string[] {
 	const failures = input.recentFailures ?? [];
 	if (failures.length > 0) {
 		const latest = failures[0];
+		const consequence = latest.context.startsWith("discord-oauth-callback")
+			? "a failed connection is shown on the OAuth page"
+			: 'a handler that fails after acknowledging leaves the client on "«bot» is thinking…"';
 		problems.push(
-			`The last interaction handler to fail was \`${latest.context}\` (${latest.at}): ${latest.message} — a handler that fails after acknowledging leaves the client on "«bot» is thinking…".`,
+			`The last recorded failure was \`${latest.context}\` (${latest.at}): ${latest.message} — ${consequence}.`,
 		);
 	}
 
