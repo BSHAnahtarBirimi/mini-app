@@ -51,6 +51,7 @@ import {
 	buildChannelMenuPayloads,
 	buildPanelPayloads,
 } from "../src/utils/linked-channel-panel.js";
+import { buildAuthorizePayloads } from "../src/utils/authorize-panel.js";
 
 /** Minimal structural subset of the Vercel node request/response we use. */
 type DiagRequest = {
@@ -82,7 +83,8 @@ function sendJson(res: DiagResponse, status: number, payload: unknown): void {
 }
 
 /**
- * Builds every message the Linked Channels flow edits into a deferred response.
+ * Builds every message the Linked Channels flow edits into a deferred response,
+ * plus the `/authorize` message (`src/utils/authorize-panel.ts`).
  *
  * A payload that throws while it is constructed kills the handler *after* the
  * acknowledgement — the user is left on "«bot» is thinking…" and the only trace
@@ -117,6 +119,34 @@ function buildPayloadsProbe(): { ok: boolean; errors: string[] } {
 		buildChannelMenuPayloads({
 			lobbyId,
 			channels: [{ id: "0", name: "diag", privacy: "unknown" }],
+		}).legacy,
+	);
+	// /authorize is the recovery path, so it is the worst message to discover is
+	// broken only when someone needs it. Both states are built: a missing
+	// connection shows the button, an existing one shows the re-authorize label.
+	attempt("authorize", () =>
+		buildAuthorizePayloads({
+			authorizeUrl: reconnectUrl,
+			status: { connected: false, hasSocialLayer: false },
+		}).v2,
+	);
+	attempt("authorize+connected", () =>
+		buildAuthorizePayloads({
+			authorizeUrl: reconnectUrl,
+			status: { connected: true, scope: "openid sdk.social_layer", hasSocialLayer: true },
+		}).v2,
+	);
+	attempt("authorize(no-url)", () =>
+		buildAuthorizePayloads({
+			authorizeUrl: null,
+			missingEnv: ["DISCORD_REDIRECT_URI"],
+			status: { connected: false, hasSocialLayer: false },
+		}).v2,
+	);
+	attempt("authorize(legacy)", () =>
+		buildAuthorizePayloads({
+			authorizeUrl: reconnectUrl,
+			status: { connected: false, hasSocialLayer: false },
 		}).legacy,
 	);
 
