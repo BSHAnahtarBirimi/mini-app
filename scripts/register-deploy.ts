@@ -19,7 +19,11 @@
 
 import { MiniInteraction } from "@minesa-org/mini-interaction";
 
-import { commandNames, loadModulesOf } from "../src/utils/command-modules.js";
+import {
+	commandNames,
+	loadModulesOf,
+	registrationProblems,
+} from "../src/utils/command-modules.js";
 import { LINKED_ROLE_METADATA } from "../src/utils/role-metadata.js";
 
 const log = (message: string) => console.log(`[register:deploy] ${message}`);
@@ -41,8 +45,13 @@ if (process.env.VERCEL_ENV !== "production") {
 		});
 		const modules = await loadModulesOf(mini);
 
-		if (modules.commands.length === 0) {
-			log("ABORTED — discovered 0 commands; refusing to overwrite the registered command list.");
+		// A payload Discord rejects replaces nothing: the whole PUT is refused and
+		// the app keeps its old command list, with the reason only in this log.
+		// So anything wrong with the payload stops the request instead.
+		const payloadProblems = registrationProblems(modules);
+
+		if (payloadProblems.length > 0) {
+			log(`ABORTED — refusing to overwrite the registered command list: ${payloadProblems.join("; ")}`);
 		} else {
 			await mini.registerCommands(botToken);
 			log(`registered ${modules.commands.length} command(s): ${commandNames(modules).join(", ")}`);

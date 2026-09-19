@@ -37,6 +37,12 @@ export type DiagInput = {
 	};
 	/** Names of the command modules the app discovered in `src/commands`. */
 	expectedCommands: string[];
+	/**
+	 * Reasons the discovered command list must not be registered — a payload with
+	 * a missing or duplicated command, which Discord rejects as a whole, leaving
+	 * the command list unchanged and the failure only in the build log.
+	 */
+	commandPayloadProblems?: string[];
 	bot: Probe<{ id: string; username: string }>;
 	guilds: Probe<{ id: string; name: string }[]>;
 	/** Commands currently registered for the application. */
@@ -120,6 +126,13 @@ export function deriveProblems(input: DiagInput): string[] {
 		);
 	} else if (input.modules.commands === 0) {
 		problems.push("No command modules were found in src/commands.");
+	}
+
+	// 2b. A registration payload Discord would reject changes nothing — silently.
+	for (const problem of input.commandPayloadProblems ?? []) {
+		problems.push(
+			`The discovered commands cannot be registered (${problem}) — the deploy refuses the PUT, so Discord still has the previous command list.`,
+		);
 	}
 
 	// 3. A handler that acknowledged Discord and then threw never completes the

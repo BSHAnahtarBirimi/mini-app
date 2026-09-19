@@ -2,7 +2,11 @@ import "dotenv/config";
 
 import { MiniInteraction } from "@minesa-org/mini-interaction";
 
-import { commandNames, loadModulesOf } from "../src/utils/command-modules.js";
+import {
+	commandNames,
+	loadModulesOf,
+	registrationProblems,
+} from "../src/utils/command-modules.js";
 import { LINKED_ROLE_METADATA } from "../src/utils/role-metadata.js";
 
 /**
@@ -43,9 +47,13 @@ const mini = new MiniInteraction({
 
 const modules = await loadModulesOf(mini);
 
-if (modules.commands.length === 0) {
+// A payload Discord rejects replaces nothing, so a malformed one is a silent
+// no-op rather than a loud failure — check before sending it.
+const payloadProblems = registrationProblems(modules);
+if (payloadProblems.length > 0) {
+	for (const problem of payloadProblems) console.error(`❌ ${problem}`);
 	console.error(
-		"❌ Discovered 0 commands in src/commands — aborting so the already registered command list is not wiped.",
+		"   Aborting so the already registered command list is not wiped or half-applied.",
 	);
 	process.exit(1);
 }
