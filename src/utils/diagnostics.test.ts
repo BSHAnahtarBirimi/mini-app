@@ -52,6 +52,50 @@ test("guild-scoped commands count as registered", () => {
 	assert.deepEqual(deriveProblems(input), []);
 });
 
+test("a recorded handler failure is reported — it is what leaves a button thinking", () => {
+	const problems = joined({
+		...healthy(),
+		recentFailures: [
+			{
+				at: "2026-09-19T18:25:00.000Z",
+				context: "linked-channel:panel-v2",
+				message: "Invalid Form Body (flags)",
+			},
+		],
+	});
+	assert.match(problems, /linked-channel:panel-v2/);
+	assert.match(problems, /Invalid Form Body/);
+	assert.match(problems, /thinking/);
+});
+
+test("only the newest failure is reported, so the list stays readable", () => {
+	const problems = joined({
+		...healthy(),
+		recentFailures: [
+			{ at: "2", context: "lc:link", message: "newest" },
+			{ at: "1", context: "lc:pick", message: "older" },
+		],
+	});
+	assert.match(problems, /lc:link/);
+	assert.doesNotMatch(problems, /lc:pick/);
+});
+
+test("a message that cannot be built is reported (it fails after the deferral)", () => {
+	const problems = joined({
+		...healthy(),
+		payloads: {
+			ok: false,
+			errors: ["panel: [SectionBuilder] accessory is required for sections"],
+		},
+	});
+	assert.match(problems, /cannot be built/);
+	assert.match(problems, /accessory is required/);
+});
+
+test("payloads that serialise fine report nothing", () => {
+	assert.deepEqual(deriveProblems({ ...healthy(), payloads: { ok: true, errors: [] } }), []);
+});
+
 test("a rejected bot token is called out (it blocks registration and linking)", () => {
 	const problems = joined({
 		...healthy(),
