@@ -146,6 +146,27 @@ function buildPayloadsProbe(): { ok: boolean; errors: string[] } {
 			status: { connected: true, scope: "openid sdk.social_layer", hasSocialLayer: true },
 		}).v2,
 	);
+	// The revoked message is the one /authorize exists to send and the hardest
+	// state to reach on purpose (it needs a token Discord has already thrown
+	// away), so its payload is proven here rather than by deauthorizing an app.
+	attempt("authorize(revoked)", () =>
+		buildAuthorizePayloads({
+			authorizeUrl: reconnectUrl,
+			status: { connected: false, hasSocialLayer: false, revoked: true },
+		}).v2,
+	);
+	attempt("authorize(unconfirmed)", () =>
+		buildAuthorizePayloads({
+			authorizeUrl: reconnectUrl,
+			status: {
+				connected: true,
+				scope: "openid sdk.social_layer",
+				hasSocialLayer: true,
+				verified: false,
+				verifyError: "Discord did not answer within 5s.",
+			},
+		}).v2,
+	);
 	attempt("authorize(no-url)", () =>
 		buildAuthorizePayloads({
 			authorizeUrl: null,
