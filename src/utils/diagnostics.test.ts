@@ -112,6 +112,24 @@ test("payloads that serialise fine report nothing", () => {
 	assert.deepEqual(deriveProblems({ ...healthy(), payloads: { ok: true, errors: [] } }), []);
 });
 
+test("a stored lobby Discord no longer knows is explained, not treated as a failure to fix", () => {
+	const problems = joined({
+		...healthy(),
+		lobbyState: { ok: false, status: 404, error: "404 — Unknown Lobby" },
+	});
+	assert.match(problems, /no longer exists/);
+	assert.match(problems, /session objects/);
+	assert.match(problems, /created automatically/);
+});
+
+test("a live lobby reports nothing, and its linked channel is inspectable", () => {
+	const input: DiagInput = {
+		...healthy(),
+		lobbyState: { ok: true, data: { id: "155", linkedChannelId: null } },
+	};
+	assert.deepEqual(deriveProblems(input), []);
+});
+
 test("a rejected bot token is called out (it blocks registration and linking)", () => {
 	const problems = joined({
 		...healthy(),
