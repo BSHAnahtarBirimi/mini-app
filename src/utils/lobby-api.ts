@@ -53,14 +53,26 @@ export type { APILobby, APILobbyInvite, LobbyMemberInput };
  */
 export const LOBBY_CALL_TIMEOUT_MS = 5_000;
 
-/** Thrown when Discord did not answer within `LOBBY_CALL_TIMEOUT_MS`. */
+/**
+ * Thrown when Discord did not answer within `LOBBY_CALL_TIMEOUT_MS`.
+ *
+ * Fields are assigned in the body rather than declared as constructor
+ * parameters: this file is imported **by Node at runtime** (the handlers are
+ * loaded by `MiniInteraction` from raw TypeScript), and Node's strip-only
+ * loader rejects TypeScript that needs transforming — parameter properties,
+ * enums, namespaces — with `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`, taking down
+ * every handler that imports this module. `src/utils/module-specifiers.test.ts`
+ * imports every runtime module under plain Node to keep that from returning.
+ */
 export class LobbyCallTimeoutError extends Error {
-	constructor(
-		readonly operation: string,
-		readonly timeoutMs: number,
-	) {
+	readonly operation: string;
+	readonly timeoutMs: number;
+
+	constructor(operation: string, timeoutMs: number) {
 		super(`Discord did not answer \`${operation}\` within ${timeoutMs / 1000}s.`);
 		this.name = "LobbyCallTimeoutError";
+		this.operation = operation;
+		this.timeoutMs = timeoutMs;
 	}
 }
 
