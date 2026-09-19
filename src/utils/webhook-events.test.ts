@@ -10,9 +10,11 @@ import {
 import type { WebhookEventPayload } from "@minesa-org/mini-interaction";
 
 import {
+	LINKED_CHANNEL_TARGET_LIMIT,
 	candidateGuilds,
 	deauthorizationMessage,
 	deliveryKeyOf,
+	linkedChannelTargets,
 	notifyLinkedChannelsOfDeauthorization,
 	summarizeEvent,
 } from "./webhook-events.ts";
@@ -119,6 +121,23 @@ test("guild candidates come from Discord, so an unindexed lobby still counts", a
 
 test("candidates are merged without duplicates", () => {
 	assert.deepEqual(unionGuilds(["a", "b"], ["b", "c", ""]), ["a", "b", "c"]);
+});
+
+test("linkedChannelTargets reports what a deauthorization would notify, without sending", async () => {
+	const many = Array.from({ length: 30 }, (_, index) => `guild-${index}`);
+	const { deps, sent } = recordingDeps({
+		listGuilds: async () => many,
+		getLobbyRecord: async () => ({ lobbyId: "1", creatorId: "someone-else" }),
+	});
+
+	const targets = await linkedChannelTargets(deps);
+
+	assert.equal(sent.length, 0, "a diagnostic must not post anything");
+	assert.equal(
+		targets.length,
+		LINKED_CHANNEL_TARGET_LIMIT,
+		"the diagnostic is bounded so a large deployment cannot fan out",
+	);
 });
 
 test("a channel linked by someone else is still told (the notice is not user-scoped)", async () => {

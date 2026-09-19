@@ -212,36 +212,80 @@ export async function notifyLinkedChannelsOfDeauthorization(
 	user: { id: string; username?: string },
 	deps: DeauthorizeDeps = defaultDeps,
 ): Promise<DeauthorizeOutcome> {
+	// Drop the connection first: it is the idempotent half, and it must not
+	// depend on any notification succeeding.
 	await deps.deleteUserToken(user.id);
 
-	const outcome: DeauthorizeOutcome = {
-		notified: [],
-		withoutLinkedChannel: [],
-		considered: [],
-		ownedByUser: [],
+	const collected = await collectLinkedChannels(user.id, deps);
+	const notified: { guildId: string; channelId: string }[] = [];
+	for (const target of collected.targets) {
+		await deps.sendChannelMessage(target.channelId, deauthorizationMessage(user));
+		notified.push(target);
+	}
+
+	return {
+		notified,
+		withoutLinkedChannel: collected.withoutLinkedChannel,
+		considered: collected.considered,
+		ownedByUser: collected.ownedByUser,
 		connectionDeleted: true,
 	};
+}
 
-	for (const guildId of await deps.listGuilds()) {
-		outcome.considered.push(guildId);
+/** How many servers {@link linkedChannelTargets} will inspect at most. */
+export const LINKED_CHANNEL_TARGET_LIMIT = 10;
+
+/**
+ * Every linked channel this app maintains — exactly what a deauthorization
+ * would notify, and what `GET /api/diag` reports so that answer is checkable
+ * without actually deauthorizing anything.
+ */
+export async function linkedChannelTargets(
+	deps: DeauthorizeDeps = defaultDeps,
+	maxGuilds: number = LINKED_CHANNEL_TARGET_LIMIT,
+): Promise<{ guildId: string; channelId: string }[]> {
+	// No user id: nothing here is filtered by who linked what.
+	return (await collectLinkedChannels("", deps, maxGuilds)).targets;
+}
+
+/**
+ * Walks the candidate servers and reads each stored lobby's live linked channel.
+ *
+ * A lobby without a linked channel has nowhere to post, and its id may have been
+ * reaped by Discord — neither is a failure, so both are recorded and skipped.
+ */
+async function collectLinkedChannels(
+	userId: string,
+	deps: DeauthorizeDeps,
+	maxGuilds: number = Number.POSITIVE_INFINITY,
+): Promise<{
+	targets: { guildId: string; channelId: string }[];
+	withoutLinkedChannel: string[];
+	considered: string[];
+	ownedByUser: string[];
+}> {
+	const targets: { guildId: string; channelId: string }[] = [];
+	const withoutLinkedChannel: string[] = [];
+	const considered: string[] = [];
+	const ownedByUser: string[] = [];
+
+	for (const guildId of (await deps.listGuilds()).slice(0, maxGuilds)) {
+		considered.push(guildId);
 
 		const record = await deps.getLobbyRecord(guildId);
 		if (!record) continue;
-		if (record.creatorId === user.id) outcome.ownedByUser.push(guildId);
+		if (userId !== "" && record.creatorId === userId) ownedByUser.push(guildId);
 
-		// A lobby without a linked channel has nowhere to post, and its id may
-		// have been reaped — neither is a failure of this delivery.
 		const channelId = await deps.readLinkedChannelId(record.lobbyId).catch(() => null);
 		if (!channelId) {
-			outcome.withoutLinkedChannel.push(guildId);
+			withoutLinkedChannel.push(guildId);
 			continue;
 		}
 
-		await deps.sendChannelMessage(channelId, deauthorizationMessage(user));
-		outcome.notified.push({ guildId, channelId });
+		targets.push({ guildId, channelId });
 	}
 
-	return outcome;
+	return { targets, withoutLinkedChannel, considered, ownedByUser };
 }
 
 // --------------------------------------------------------------------- router

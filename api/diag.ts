@@ -46,6 +46,7 @@ import type { LobbyRecord } from "../src/utils/lobby-store.js";
 import { describeLobbyError, getLobby } from "../src/utils/lobby-api.js";
 import { describeError, getInteractionErrors } from "../src/utils/interaction-errors.js";
 import { getRecentEvents } from "../src/utils/event-log.js";
+import { linkedChannelTargets } from "../src/utils/webhook-events.js";
 import {
 	buildChannelMenuPayloads,
 	buildPanelPayloads,
@@ -312,6 +313,12 @@ export default async function handler(req: DiagRequest, res: DiagResponse): Prom
 	// What Discord's Webhook Events endpoint sent us. Recording them is the only
 	// way to tell "never configured" from "configured, nothing happened yet".
 	const recentEvents = await getRecentEvents();
+	// Which linked channels an `APPLICATION_DEAUTHORIZED` notice would reach.
+	// Reported so that "did my second server get it?" is answerable directly,
+	// instead of by deauthorizing the app and watching. Bounded (see
+	// LINKED_CHANNEL_TARGET_LIMIT) so a large deployment cannot turn this into
+	// hundreds of Discord calls.
+	const linkedChannels = await probe(() => linkedChannelTargets());
 	const payloads = buildPayloadsProbe();
 
 	const problems = deriveProblems({
@@ -358,6 +365,7 @@ export default async function handler(req: DiagRequest, res: DiagResponse): Prom
 		userToken,
 		recentFailures,
 		recentEvents,
+		linkedChannels,
 		payloads,
 		channels,
 		selectedChannel,

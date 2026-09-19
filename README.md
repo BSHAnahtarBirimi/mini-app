@@ -365,6 +365,7 @@ names Discord already shows to everyone):
 | `channels`, `selectedChannel`, `lobby` | The Linked Channels channel menu with privacy verdicts, and the stored lobby |
 | `recentFailures` | The last handler failures, which is why a message stayed on "«bot» is thinking…" |
 | `recentEvents` | The last Webhook Events Discord delivered, with what the handler did |
+| `linkedChannels` | Which linked channels an `APPLICATION_DEAUTHORIZED` notice would reach (bounded to 10 servers) |
 | `lobbyState` | Whether the stored lobby still exists on Discord's side (and its linked channel) |
 | `payloads` | Whether the Linked Channels messages can be serialised at all |
 | `filesystem` (`?fs=1`) | The function's `cwd` and which runtime paths actually exist |
