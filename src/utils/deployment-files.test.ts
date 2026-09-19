@@ -23,6 +23,34 @@ import { fileURLToPath } from "node:url";
 const FUNCTION_FILES = ["index.ts", "interactions.ts", "diag.ts", "discord-oauth-callback.ts"];
 
 /**
+ * `src/**` is shipped as raw TypeScript, and the modules inside it import each
+ * other with explicit `.ts` specifiers (they must: the interaction handlers are
+ * imported by Node at runtime, which rewrites nothing). A compiled function
+ * bundle keeps those specifiers as written, so a function only resolves them if
+ * it ships that tree too. Dropping `includeFiles` from one entry is what made
+ * the OAuth callback answer `FUNCTION_INVOCATION_FAILED`:
+ * `Cannot find module '/var/task/src/utils/database.ts'`.
+ */
+test("every function ships src/** so the .ts specifiers inside it resolve", async () => {
+	const config = JSON.parse(
+		await readFile(fileURLToPath(new URL("../../vercel.json", import.meta.url)), "utf8"),
+	) as { functions?: Record<string, { includeFiles?: string }> };
+
+	const configured = Object.entries(config.functions ?? {});
+	assert.ok(configured.length > 0, "vercel.json declares function configuration");
+
+	const missing = configured
+		.filter(([, options]) => options.includeFiles !== "src/**")
+		.map(([file, options]) => `${file} → includeFiles: ${options.includeFiles ?? "(none)"}`);
+
+	assert.deepEqual(
+		missing,
+		[],
+		`these functions would fail to resolve the .ts imports inside src/** at runtime:\n${missing.join("\n")}`,
+	);
+});
+
+/**
  * Reading a page at request time, or asking the library to. Referencing the
  * paths is fine — `api/diag.ts?fs=1` *stats* them on purpose, which is how the
  * rule was established.
