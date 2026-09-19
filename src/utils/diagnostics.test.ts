@@ -80,6 +80,22 @@ test("only the newest failure is reported, so the list stays readable", () => {
 	assert.doesNotMatch(problems, /lc:pick/);
 });
 
+test("a message that cannot be built is reported (it fails after the deferral)", () => {
+	const problems = joined({
+		...healthy(),
+		payloads: {
+			ok: false,
+			errors: ["panel: [SectionBuilder] accessory is required for sections"],
+		},
+	});
+	assert.match(problems, /cannot be built/);
+	assert.match(problems, /accessory is required/);
+});
+
+test("payloads that serialise fine report nothing", () => {
+	assert.deepEqual(deriveProblems({ ...healthy(), payloads: { ok: true, errors: [] } }), []);
+});
+
 test("a rejected bot token is called out (it blocks registration and linking)", () => {
 	const problems = joined({
 		...healthy(),

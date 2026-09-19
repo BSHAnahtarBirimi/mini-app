@@ -40,7 +40,11 @@ import type { ClassifiedChannel } from "../src/utils/lobby-channels.js";
 import { getLobbyRecord } from "../src/utils/lobby-store.js";
 import type { LobbyRecord } from "../src/utils/lobby-store.js";
 import { describeLobbyError } from "../src/utils/lobby-api.js";
-import { getInteractionErrors } from "../src/utils/interaction-errors.js";
+import { describeError, getInteractionErrors } from "../src/utils/interaction-errors.js";
+import {
+	buildChannelMenuPayloads,
+	buildPanelPayloads,
+} from "../src/utils/linked-channel-panel.js";
 
 /** Minimal structural subset of the Vercel node request/response we use. */
 type DiagRequest = { method?: string; url?: string };
@@ -55,6 +59,48 @@ function sendJson(res: DiagResponse, status: number, payload: unknown): void {
 	res.setHeader("Content-Type", "application/json; charset=utf-8");
 	res.setHeader("Cache-Control", "no-store");
 	res.end(JSON.stringify(payload, null, 2));
+}
+
+/**
+ * Builds every message the Linked Channels flow edits into a deferred response.
+ *
+ * A payload that throws while it is constructed kills the handler *after* the
+ * acknowledgement — the user is left on "«bot» is thinking…" and the only trace
+ * is a `console.error`. Serialising them here makes that failure visible in
+ * `/api/diag` before anyone presses a button, which is how the accessory-less
+ * section bug reached production unnoticed.
+ */
+function buildPayloadsProbe(): { ok: boolean; errors: string[] } {
+	const errors: string[] = [];
+	const attempt = (name: string, build: () => unknown) => {
+		try {
+			// The request serializer walks the builders through toJSON().
+			JSON.stringify(build());
+		} catch (error) {
+			errors.push(`${name}: ${describeError(error)}`);
+		}
+	};
+
+	const lobbyId = "0";
+	const reconnectUrl = "https://discord.com/oauth2/authorize?client_id=0&scope=openid";
+
+	attempt("panel", () => buildPanelPayloads({ lobbyId, reconnectUrl: null }).v2);
+	attempt("panel+reconnect", () => buildPanelPayloads({ lobbyId, reconnectUrl }).v2);
+	attempt("panel(legacy)", () => buildPanelPayloads({ lobbyId, reconnectUrl }).legacy);
+	attempt("channel-menu", () =>
+		buildChannelMenuPayloads({
+			lobbyId,
+			channels: [{ id: "0", name: "diag", privacy: "unknown" }],
+		}).v2,
+	);
+	attempt("channel-menu(legacy)", () =>
+		buildChannelMenuPayloads({
+			lobbyId,
+			channels: [{ id: "0", name: "diag", privacy: "unknown" }],
+		}).legacy,
+	);
+
+	return { ok: errors.length === 0, errors };
 }
 
 /** Runs a Discord call and captures its outcome instead of throwing. */
@@ -189,8 +235,10 @@ export default async function handler(req: DiagRequest, res: DiagResponse): Prom
 	// only place a "«bot» is thinking…" cause becomes visible without dashboard
 	// access — the framework logs those to console.error and nowhere else.
 	const recentFailures = await getInteractionErrors();
+	const payloads = buildPayloadsProbe();
 
 	const problems = deriveProblems({
+		payloads,
 		env,
 		modules: {
 			commands: modules.commands,
@@ -229,6 +277,7 @@ export default async function handler(req: DiagRequest, res: DiagResponse): Prom
 		userId,
 		userToken,
 		recentFailures,
+		payloads,
 		channels,
 		selectedChannel,
 		lobby,

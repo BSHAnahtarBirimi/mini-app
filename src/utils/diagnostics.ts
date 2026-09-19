@@ -57,6 +57,12 @@ export type DiagInput = {
 	 * only reaches `console.error`, which needs dashboard access to read.
 	 */
 	recentFailures?: { at: string; context: string; message: string }[];
+	/**
+	 * Result of serialising the messages the Linked Channels flow sends. A
+	 * payload that cannot be built fails *after* the deferral, which is the
+	 * "«bot» is thinking…" state, so it is reported like any other problem.
+	 */
+	payloads?: { ok: boolean; errors: string[] };
 };
 
 /** True when a probe was rejected by Discord for a bad/expired token. */
@@ -102,7 +108,14 @@ export function deriveProblems(input: DiagInput): string[] {
 		);
 	}
 
-	// 4. Bot token validity — bot-authenticated calls (channel list, lobbies,
+	// 4. A message that cannot even be built ends the interaction silently.
+	if (input.payloads && !input.payloads.ok) {
+		problems.push(
+			`The Linked Channels messages cannot be built: ${input.payloads.errors.join("; ")} — the handler dies after acknowledging, leaving "«bot» is thinking…".`,
+		);
+	}
+
+	// 5. Bot token validity — bot-authenticated calls (channel list, lobbies,
 	//    command registration) all fail together when the token is stale.
 	if (isAuthFailure(input.bot)) {
 		problems.push(
@@ -114,7 +127,7 @@ export function deriveProblems(input: DiagInput): string[] {
 		problems.push("DISCORD_APPLICATION_ID is missing but the bot token works.");
 	}
 
-	// 5. Commands only appear in a server when the bot is installed there with
+	// 6. Commands only appear in a server when the bot is installed there with
 	//    the `applications.commands` scope.
 	const guilds = input.guilds.ok ? (input.guilds.data ?? []) : undefined;
 	if (guilds && guilds.length === 0) {
@@ -125,7 +138,7 @@ export function deriveProblems(input: DiagInput): string[] {
 		problems.push(`Could not list the bot's servers: ${input.guilds.error ?? "unknown error"}.`);
 	}
 
-	// 6. Registration state: this is the usual reason commands are invisible.
+	// 7. Registration state: this is the usual reason commands are invisible.
 	const globalNames = input.registered.global.ok ? (input.registered.global.data ?? []) : [];
 	const guildNames = input.registered.guild?.ok ? (input.registered.guild.data ?? []) : [];
 	const registeredNames = new Set([...globalNames, ...guildNames]);
@@ -157,7 +170,7 @@ export function deriveProblems(input: DiagInput): string[] {
 		}
 	}
 
-	// 7. Linked Channels extras.
+	// 8. Linked Channels extras.
 	if (input.userToken) {
 		if (!input.userToken.connected) {
 			problems.push(
