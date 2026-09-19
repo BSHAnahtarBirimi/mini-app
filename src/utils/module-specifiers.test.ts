@@ -59,9 +59,12 @@ test("runtime-loaded modules import their siblings with explicit .ts extensions"
  * broke `/api/diag` and would have broken every Linked Channels handler).
  *
  * Importing each module under plain Node is the only check that catches this
- * before a deploy, so the test does exactly that, in one child process.
+ * before a deploy, so the test does exactly that, in one child process. It is
+ * skipped on a Node that cannot import TypeScript at all (strip-only types
+ * arrived in 22.6), because there the import fails for an unrelated reason and
+ * says nothing about the syntax.
  */
-test("runtime-loaded modules use only TypeScript that Node can strip", async () => {
+test("runtime-loaded modules use only TypeScript that Node can strip", async (t) => {
 	const sourceRoot = fileURLToPath(new URL("../", import.meta.url));
 	const self = path.basename(fileURLToPath(import.meta.url));
 
@@ -88,6 +91,15 @@ test("runtime-loaded modules use only TypeScript that Node can strip", async () 
 		maxBuffer: 4 * 1024 * 1024,
 	});
 	const failures = JSON.parse(output) as { file: string; code: string | null; message: string }[];
+
+	// Older runtimes reject the extension itself, so this cannot judge anything.
+	if (failures.length > 0 && failures.every(({ code }) => code === "ERR_UNKNOWN_FILE_EXTENSION")) {
+		t.skip(
+			`Node ${process.versions.node} cannot import TypeScript (strip-only types start in 22.6); ` +
+				"the deployment runs Node 24, where this check applies",
+		);
+		return;
+	}
 
 	assert.deepEqual(
 		failures.map(({ file, code, message }) => `${path.relative(sourceRoot, fileURLToPath(file))}: ${code ?? ""} ${message}`),
