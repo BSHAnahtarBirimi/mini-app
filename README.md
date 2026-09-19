@@ -150,6 +150,14 @@ working. `src/utils/module-specifiers.test.ts` enforces this for `src/`.
 > and legacy forms of each message in one tested place
 > (`src/utils/linked-channel-panel.test.ts` constructs every payload), and
 > `api/interactions.ts` records handler failures for `/api/diag`.
+>
+> A function must not read a **page** from disk at request time. Vercel bundles
+> the imported source tree (`src/**`) but serves `index.html` and `public/**` as
+> static output, so they are absent from the function — `GET /api/diag?fs=1`
+> reports the layout (`cwd: /var/task`) and proves it. `includeFiles` does not
+> fix it either. The OAuth pages therefore live in `src/utils/oauth-pages.ts` and
+> are returned as strings; `src/utils/deployment-files.test.ts` fails the build
+> if a function goes back to `htmlFile`/`readFile`.
 
 ## Handler API reference
 
@@ -235,6 +243,8 @@ names Discord already shows to everyone):
 | `registered.global` / `registered.guild` | Which commands Discord currently has |
 | `channels`, `selectedChannel`, `lobby` | The Linked Channels channel menu with privacy verdicts, and the stored lobby |
 | `recentFailures` | The last handler failures, which is why a message stayed on "«bot» is thinking…" |
+| `payloads` | Whether the Linked Channels messages can be serialised at all |
+| `filesystem` (`?fs=1`) | The function's `cwd` and which runtime paths actually exist |
 | `links.botInvite` | Invite URL with `scope=bot+applications.commands` |
 
 ```bash

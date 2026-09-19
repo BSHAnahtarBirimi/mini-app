@@ -26,6 +26,9 @@ import {
 	MiniInteraction,
 } from "@minesa-org/mini-interaction";
 
+import { stat } from "node:fs/promises";
+import path from "node:path";
+
 import {
 	DIAG_ENV_VARS,
 	buildBotInviteUrl,
@@ -101,6 +104,45 @@ function buildPayloadsProbe(): { ok: boolean; errors: string[] } {
 	);
 
 	return { ok: errors.length === 0, errors };
+}
+
+/**
+ * Where the deployment actually keeps files (`?fs=1`).
+ *
+ * The OAuth pages are rendered by reading a file at request time, so a file
+ * that is missing from the function bundle turns every branch of the callback
+ * into `FUNCTION_INVOCATION_FAILED` — including the one that reports the
+ * failure. This reports the function's working directory and whether each path
+ * the code reads at runtime is present, so the bundling can be fixed from
+ * evidence rather than guesswork.
+ */
+async function probeFiles(): Promise<{
+	cwd: string;
+	candidates: { path: string; exists: boolean; bytes: number | null }[];
+}> {
+	const cwd = process.cwd();
+	const relative = [
+		"index.html",
+		"public/pages/connected.html",
+		"public/pages/failed.html",
+		"src/commands/linked-channel.ts",
+		"src/utils/linked-channel-panel.ts",
+		"package.json",
+	];
+
+	const candidates = await Promise.all(
+		[...relative, ...relative.map((entry) => path.join("/var/task", entry))].map(async (entry) => {
+			const absolute = path.isAbsolute(entry) ? entry : path.resolve(cwd, entry);
+			try {
+				const info = await stat(absolute);
+				return { path: absolute, exists: true, bytes: info.size };
+			} catch {
+				return { path: absolute, exists: false, bytes: null };
+			}
+		}),
+	);
+
+	return { cwd, candidates };
 }
 
 /** Runs a Discord call and captures its outcome instead of throwing. */
@@ -256,6 +298,7 @@ export default async function handler(req: DiagRequest, res: DiagResponse): Prom
 
 	sendJson(res, 200, {
 		ok: problems.length === 0,
+		...(url.searchParams.get("fs") === "1" ? { filesystem: await probeFiles() } : {}),
 		deployment: {
 			vercelEnv: process.env.VERCEL_ENV ?? null,
 			commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? null,
