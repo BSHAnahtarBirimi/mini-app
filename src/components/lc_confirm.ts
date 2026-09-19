@@ -104,6 +104,20 @@ export const confirmLinkButton = {
 					].join("\n"),
 				});
 			}
+			// The one failure that is not about permissions or scopes: the
+			// application-wide development cap. Say what to do about it.
+			if (error instanceof DiscordRestApiError && error.status === 429) {
+				console.error("[lc:confirm] link rate limited:", error.status, error.body);
+				await recordInteractionError(error, "lc:confirm:rate-limited");
+				return interaction.editReply({
+					content: [
+						"⏳ **Discord rate-limited the link (429).**",
+						`• ${describeLobbyError(error)}`,
+						"",
+						"While the app is unapproved, channel linking is capped at **20 calls per 2 hours per application** — and the cap covers attempts, not successes. Wait for the window to reset, then try again. Nothing was linked and the request was **not** retried.",
+					].join("\n"),
+				});
+			}
 			if (error instanceof DiscordRestApiError) {
 				console.error("[lc:confirm] link failed:", error.status, error.body);
 				return interaction.editReply({
