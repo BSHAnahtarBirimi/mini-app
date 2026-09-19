@@ -1,27 +1,15 @@
-import { getDiscordUser, getOAuthTokens } from "@minesa-org/mini-interaction";
-
-import { getDb, updateDiscordMetadata } from "../src/utils/database.js";
-import { recordInteractionError, describeError } from "../src/utils/interaction-errors.js";
-import { hasSocialLayerScope } from "../src/utils/lobby-oauth.js";
-import { connectedPage, failedPage } from "../src/utils/oauth-pages.js";
-
 /**
- * OAuth2 callback. Exchanges the code, stores tokens in MiniDatabase and writes
- * the `is_miniapp` role-connection metadata for the user.
+ * OAuth2 callback entry point.
  *
- * This is deliberately not `mini.discordOAuthCallback()`: that helper renders
- * every branch — including its own error path — by reading an HTML file at
- * request time, and those files are not in the function bundle, so the endpoint
- * answered `FUNCTION_INVOCATION_FAILED` for every request and could never report
- * why. The flow is the same, the pages come from `src/utils/oauth-pages.ts`, and
- * a failure now says what happened and is recorded for `GET /api/diag`.
+ * The flow lives in `src/utils/oauth-callback.ts` and is imported **inside** the
+ * request, not at the top level. This endpoint has already spent a day answering
+ * `FUNCTION_INVOCATION_FAILED` for every request — a module-scope failure leaves
+ * no way to say why, and the user only sees "A function needed by this page
+ * failed". Loading the flow dynamically means a failure to load it is caught,
+ * reported, and recorded like any other.
  *
- * Tokens are stored under the user's Discord id with the shape
- * `src/utils/lobby-tokens.ts` reads (`accessToken`, `refreshToken`, `expiresAt`,
- * `scope`) — that record is what channel linking uses afterwards.
+ * The fallback page below therefore imports nothing at all.
  */
-
-const COOKIE_NAME = "mini_oauth_state";
 
 type OAuthRequest = {
 	url?: string;
@@ -33,6 +21,37 @@ type OAuthResponse = {
 	end(body?: string): void;
 };
 
+function escapeHtml(value: string): string {
+	return value
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;");
+}
+
+/** Rendered with no dependencies, so it works even when imports fail. */
+function failurePage(message: string, detail?: string): string {
+	return `<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Connection failed</title>
+	</head>
+	<body style="margin: 0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: #1e1f22; color: #dbdee1; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; text-align: center; padding: 24px">
+		<div style="font-size: 48px">⚠️</div>
+		<h1 style="margin: 0; color: #f23f43; font-size: 24px">Connection failed</h1>
+		<p style="margin: 0; max-width: 42ch; color: hsl(214 8.1% 61.2%)">${escapeHtml(message)}</p>
+		${
+			detail
+				? `<pre style="margin: 0; max-width: 60ch; overflow-x: auto; text-align: left; background: #2b2d31; color: hsl(214 8.1% 78%); padding: 12px; border-radius: 8px; font-size: 13px">${escapeHtml(detail)}</pre>`
+				: ""
+		}
+	</body>
+</html>
+`;
+}
+
 function sendHtml(res: OAuthResponse, html: string): void {
 	res.statusCode = 200;
 	res.setHeader("Content-Type", "text/html; charset=utf-8");
@@ -40,128 +59,32 @@ function sendHtml(res: OAuthResponse, html: string): void {
 	res.end(html);
 }
 
-/** Reads one cookie from the raw header (no cookie parser in the runtime). */
-function readCookie(req: OAuthRequest, name: string): string | null {
-	const header = req.headers?.cookie;
-	const raw = Array.isArray(header) ? header.join("; ") : header;
-	if (!raw) return null;
-	for (const part of raw.split(";")) {
-		const [key, ...rest] = part.trim().split("=");
-		if (key === name) return decodeURIComponent(rest.join("="));
-	}
-	return null;
-}
-
 export default async function handler(req: OAuthRequest, res: OAuthResponse): Promise<void> {
-	const redirectUri = process.env.DISCORD_REDIRECT_URI;
-	const requestUrl = new URL(req.url ?? "/", redirectUri ?? "http://localhost");
-	const error = requestUrl.searchParams.get("error");
-	const code = requestUrl.searchParams.get("code");
-	const state = requestUrl.searchParams.get("state");
-	const cookieState = readCookie(req, COOKIE_NAME);
-
-	// The cookie is single-use: clear it on every outcome so a stale state value
-	// cannot make a later attempt look invalid.
-	const clearStateCookie = () =>
-		res.setHeader("Set-Cookie", `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
-
-	if (error) {
-		clearStateCookie();
-		sendHtml(
-			res,
-			failedPage({
-				heading: "Authorization cancelled",
-				message: `Discord returned \`${error}\`. Nothing was stored.`,
-				detail: requestUrl.searchParams.get("error_description") ?? undefined,
-			}),
-		);
-		return;
-	}
-
-	if (!code) {
-		sendHtml(
-			res,
-			failedPage({
-				message:
-					"This page is the OAuth callback, so it needs a `code` parameter. Open the Connect Discord page and start the flow from there.",
-			}),
-		);
-		return;
-	}
-
-	if (state && cookieState && state !== cookieState) {
-		clearStateCookie();
-		sendHtml(
-			res,
-			failedPage({
-				message:
-					"The OAuth state did not match the session cookie, so the response was rejected. Start the flow again from the Connect Discord page in the same browser.",
-			}),
-		);
-		return;
-	}
-
-	const appId = process.env.DISCORD_APPLICATION_ID ?? process.env.DISCORD_APP_ID;
-	const appSecret = process.env.DISCORD_CLIENT_SECRET;
-	if (!appId || !appSecret || !redirectUri) {
-		const missing = [
-			!appId && "DISCORD_APPLICATION_ID",
-			!appSecret && "DISCORD_CLIENT_SECRET",
-			!redirectUri && "DISCORD_REDIRECT_URI",
-		]
-			.filter(Boolean)
-			.join(", ");
-		sendHtml(
-			res,
-			failedPage({
-				message: `The deployment is missing ${missing}, so the authorization code cannot be exchanged.`,
-			}),
-		);
-		return;
-	}
-
 	try {
-		const tokens = await getOAuthTokens(code, { appId, appSecret, redirectUri });
-		const user = await getDiscordUser(tokens.access_token);
-
-		// Stored first: `/linked-channel` needs this record even if the
-		// linked-roles call below is rejected.
-		await getDb().set(user.id, {
-			accessToken: tokens.access_token,
-			refreshToken: tokens.refresh_token,
-			expiresAt: tokens.expires_at,
-			scope: tokens.scope,
-		});
-
+		const { handleOAuthCallback } = await import("../src/utils/oauth-callback.js");
+		await handleOAuthCallback(req, res);
+	} catch (error) {
+		// Best-effort recording; the page is what matters here.
 		try {
-			await updateDiscordMetadata(user.id, tokens.access_token);
-		} catch (metadataError) {
-			// A Social SDK authorization (`openid sdk.social_layer`) carries no
-			// `role_connections.write`, so this PUT is rejected with 403. That
-			// must not fail the connection — the token above is already stored
-			// and it is the one channel linking needs.
-			console.error("[oauth] linked-role metadata update failed:", metadataError);
+			const { recordInteractionError, describeError } = await import(
+				"../src/utils/interaction-errors.js"
+			);
+			await recordInteractionError(error, "discord-oauth-callback:load");
+			sendHtml(
+				res,
+				failurePage(
+					"The deployment could not load the OAuth flow, so the connection was not completed.",
+					describeError(error),
+				),
+			);
+		} catch {
+			sendHtml(
+				res,
+				failurePage(
+					"The deployment could not load the OAuth flow, so the connection was not completed.",
+					error instanceof Error ? error.message : String(error),
+				),
+			);
 		}
-
-		clearStateCookie();
-		sendHtml(
-			res,
-			connectedPage({
-				scope: tokens.scope,
-				hasSocialLayer: hasSocialLayerScope(tokens.scope),
-			}),
-		);
-	} catch (exchangeError) {
-		// Recorded so `/api/diag` can explain it: this is an interaction-visible
-		// failure the user cannot otherwise diagnose.
-		await recordInteractionError(exchangeError, "discord-oauth-callback");
-		sendHtml(
-			res,
-			failedPage({
-				message:
-					"Discord rejected the authorization code. Codes are single-use and short-lived — start the flow again.",
-				detail: describeError(exchangeError),
-			}),
-		);
 	}
 }
