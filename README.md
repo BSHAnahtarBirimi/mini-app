@@ -136,18 +136,41 @@ Lobby API (see `docs.discord.com/developers/resources/lobby`):
   **20 calls per 2 hours per application** — failed links are shown to the
   user and never retried in a loop.
 
+### When it does not link
+
+The panel and the components answer with the reason instead of failing
+silently: `MONGODB_URI` missing (nothing can be persisted), a stored token
+without `sdk.social_layer` (press **Reconnect Discord**), a lobby whose member
+lacks `CanLinkLobby`, missing Manage Channels / View Channel / Send Messages on
+the chosen channel, or the 20-calls-per-2-hours development cap. User tokens
+expire after ~7 days and are refreshed automatically from the stored refresh
+token. The picked channel is persisted in `MiniDatabase`
+(`lc-pending:${userId}:${guildId}`, 10 minute TTL) because consecutive
+interactions can be served by different serverless instances.
+
 Run the pure-logic tests with `npm test`.
 
 ### Package version note
 
 Built on `@minesa-org/mini-interaction` **v0.14.0**, which ships the full Lobby
 surface (`LobbyMemberFlags`, `linkChannelToLobby`, `unlinkChannelFromLobby`,
-`createLobbyChannelInviteForSelf`, `OAuth2Builder`). v0.14.0 is published as a
-GitHub release/tag only — npm still serves 0.9.0 — so the dependency is pinned
-via git (`github:minesa-org/mini-interaction#v0.14.0`) with a lockfile
-resolution over anonymous HTTPS so CI's `npm ci` works without credentials.
-`src/utils/lobby-api.ts` wraps the package's `DiscordRestClient` with
-`maxRetries: 0` so a rate-limited link fails fast instead of retrying.
+`createLobbyChannelInviteForSelf`, `OAuth2Builder`). `src/utils/lobby-api.ts`
+wraps the package's `DiscordRestClient` with `maxRetries: 0` so a rate-limited
+link fails fast instead of retrying.
+
+v0.14.0 exists only as a GitHub tag — npm still serves 0.9.0 — and it cannot be
+installed from there on Vercel: the build image's npm 12 refuses git
+dependencies (`allow-git = none`) and remote tarballs (`allow-remote = none`),
+and the tag does not commit the `dist/` that its blocked `prepare` script would
+build. So the **built package is vendored** as
+`vendor/mini-interaction-0.14.0.tgz` and installed through a `file:` spec,
+which npm 10, npm 12 and bun all accept offline. To move to another tag:
+
+```bash
+node scripts/vendor-mini-interaction.mjs v0.15.0
+npm pkg set 'dependencies.@minesa-org/mini-interaction=file:vendor/mini-interaction-0.15.0.tgz'
+npm install
+```
 
 ## Environment variables
 

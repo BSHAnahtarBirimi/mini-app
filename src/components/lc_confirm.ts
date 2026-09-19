@@ -1,10 +1,9 @@
 import { MessageFlags } from "@minesa-org/mini-interaction";
 import type { ComponentHandler } from "@minesa-org/mini-interaction";
 
-import { db } from "../utils/database.js";
 import { getLobbyRecord } from "../utils/lobby-store.js";
-import { getPendingLink } from "../utils/linked-channel-state.js";
-import { getStoredUserToken } from "../utils/lobby-tokens.js";
+import { getPendingLink, clearPendingLink } from "../utils/linked-channel-state.js";
+import { getFreshUserToken } from "../utils/lobby-tokens.js";
 import { hasSocialLayerScope } from "../utils/lobby-oauth.js";
 import { linkChannelToLobby, describeLobbyError, DiscordRestApiError } from "../utils/lobby-api.js";
 
@@ -30,7 +29,7 @@ export const confirmLinkButton = {
 			});
 		}
 
-		const record = await getLobbyRecord(db, guildId);
+		const record = await getLobbyRecord(guildId);
 		if (!record) {
 			return interaction.reply({
 				content: "❌ No lobby found for this server. Run `/linked-channel` first.",
@@ -38,15 +37,18 @@ export const confirmLinkButton = {
 			});
 		}
 
-		const pending = getPendingLink(userId, guildId);
+		const pending = await getPendingLink(userId, guildId);
 		if (!pending || pending.channelId === "") {
 			return interaction.reply({
-				content: "⌛ This link request expired. Start again with **Link a channel**.",
+				content: [
+					"⌛ **The selected channel was forgotten** — pending picks expire after 10 minutes.",
+					"Start again with **Link a channel**.",
+				].join("\n"),
 				flags: MessageFlags.Ephemeral,
 			});
 		}
 
-		const storedToken = await getStoredUserToken(db, userId);
+		const storedToken = await getFreshUserToken(userId);
 		if (!storedToken) {
 			return interaction.reply({
 				content:
@@ -73,6 +75,8 @@ export const confirmLinkButton = {
 			const channelMention = pending.channelName
 				? `**#${pending.channelName}**`
 				: `<#${pending.channelId}>`;
+			// The link succeeded, so the pending pick has served its purpose.
+			await clearPendingLink(userId, guildId);
 
 			return interaction.reply({
 				content: [
@@ -97,7 +101,10 @@ export const confirmLinkButton = {
 			}
 			console.error("[lc:confirm] unexpected error:", error);
 			return interaction.reply({
-				content: "❌ Unexpected error while linking. The request was **not** retried.",
+				content: [
+					"❌ **Unexpected error while linking.** The request was **not** retried.",
+					`• ${error instanceof Error ? error.message : String(error)}`,
+				].join("\n"),
 				flags: MessageFlags.Ephemeral,
 			});
 		}

@@ -13,11 +13,10 @@ import {
 import type { MessageActionRowComponent } from "@minesa-org/mini-interaction";
 import type { ComponentHandler } from "@minesa-org/mini-interaction";
 
-import { db } from "../utils/database.js";
 import { getLobbyRecord } from "../utils/lobby-store.js";
 import { listGuildChannelsForMenu, buildChannelMenuOptions } from "../utils/lobby-channels.js";
 import { hasSocialLayerScope } from "../utils/lobby-oauth.js";
-import { getStoredUserToken } from "../utils/lobby-tokens.js";
+import { getFreshUserToken } from "../utils/lobby-tokens.js";
 
 /**
  * `lc:link` — shows the channel select menu for linking.
@@ -41,7 +40,7 @@ export const linkButton = {
 			});
 		}
 
-		const record = await getLobbyRecord(db, guildId);
+		const record = await getLobbyRecord(guildId);
 		if (!record) {
 			return interaction.reply({
 				content: "❌ No lobby found for this server. Run `/linked-channel` first.",
@@ -51,7 +50,7 @@ export const linkButton = {
 
 		// Fast scope pre-flight: warn before the user browses channels if the
 		// stored token lacks sdk.social_layer (linking would 403 anyway).
-		const storedToken = await getStoredUserToken(db, userId);
+		const storedToken = await getFreshUserToken(userId);
 		if (!storedToken || !hasSocialLayerScope(storedToken.scope)) {
 			return interaction.reply({
 				content:
@@ -70,7 +69,7 @@ export const linkButton = {
 
 		let channels;
 		try {
-			channels = await listGuildChannelsForMenu(guildId, botToken);
+			channels = await listGuildChannelsForMenu(guildId);
 		} catch (error) {
 			console.error("[lc:link] channel listing failed:", error);
 			return interaction.reply({

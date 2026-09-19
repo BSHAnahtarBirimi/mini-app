@@ -1,9 +1,8 @@
 import { MessageFlags } from "@minesa-org/mini-interaction";
 import type { ComponentHandler } from "@minesa-org/mini-interaction";
 
-import { db } from "../utils/database.js";
 import { getLobbyRecord } from "../utils/lobby-store.js";
-import { getStoredUserToken } from "../utils/lobby-tokens.js";
+import { getFreshUserToken } from "../utils/lobby-tokens.js";
 import { hasSocialLayerScope } from "../utils/lobby-oauth.js";
 import { createLobbyChannelInviteForSelf, describeLobbyError, DiscordRestApiError } from "../utils/lobby-api.js";
 
@@ -30,7 +29,7 @@ export const joinServerButton = {
 			});
 		}
 
-		const record = await getLobbyRecord(db, guildId);
+		const record = await getLobbyRecord(guildId);
 		if (!record) {
 			return interaction.reply({
 				content: "❌ No lobby found for this server. Ask an admin to run `/linked-channel` first.",
@@ -38,7 +37,7 @@ export const joinServerButton = {
 			});
 		}
 
-		const storedToken = await getStoredUserToken(db, userId);
+		const storedToken = await getFreshUserToken(userId);
 		if (!storedToken) {
 			return interaction.reply({
 				content:
@@ -82,7 +81,10 @@ export const joinServerButton = {
 			}
 			console.error("[lc:join] unexpected error:", error);
 			return interaction.reply({
-				content: "❌ Unexpected error while creating the invite.",
+				content: [
+					"❌ **Unexpected error while creating the invite.**",
+					`• ${error instanceof Error ? error.message : String(error)}`,
+				].join("\n"),
 				flags: MessageFlags.Ephemeral,
 			});
 		}

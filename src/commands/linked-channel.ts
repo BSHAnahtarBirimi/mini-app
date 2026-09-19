@@ -14,11 +14,14 @@ import {
 import type { MessageActionRowComponent } from "@minesa-org/mini-interaction";
 import type { SlashCommandHandler } from "@minesa-org/mini-interaction";
 
-import { db } from "../utils/database.js";
-import { getLobbyRecord, setLobbyRecord, deleteLobbyRecord } from "../utils/lobby-store.js";
-import { createLobby } from "../utils/lobby-api.js";
+import {
+	DATABASE_NOT_CONFIGURED_MESSAGE,
+	hasDatabaseConfig,
+} from "../utils/database.js";
+import { getLobbyRecord, setLobbyRecord } from "../utils/lobby-store.js";
+import { createLobby, describeLobbyError, DiscordRestApiError } from "../utils/lobby-api.js";
 import { hasSocialLayerScope, buildSocialSdkOAuthUrl } from "../utils/lobby-oauth.js";
-import { getStoredUserToken } from "../utils/lobby-tokens.js";
+import { getFreshUserToken } from "../utils/lobby-tokens.js";
 
 /**
  * `/linked-channel` — Linked Channels example flow.
@@ -52,10 +55,19 @@ export const linkedChannelCommand = {
 			});
 		}
 
+		// Lobby links and user tokens live in MiniDatabase; without it every
+		// later step would silently look "unlinked".
+		if (!hasDatabaseConfig()) {
+			return interaction.reply({
+				content: DATABASE_NOT_CONFIGURED_MESSAGE,
+				flags: MessageFlags.Ephemeral,
+			});
+		}
+
 		// Auto-provision: create the lobby once per guild with the invoking
 		// admin as a member carrying CanLinkLobby (1 << 0). Without that flag a
 		// member can neither link nor unlink channels.
-		let record = await getLobbyRecord(db, guildId);
+		let record = await getLobbyRecord(guildId);
 		if (!record) {
 			const applicationId = process.env.DISCORD_APPLICATION_ID;
 			const botToken = process.env.DISCORD_BOT_TOKEN;
@@ -74,11 +86,17 @@ export const linkedChannelCommand = {
 					creatorId: userId,
 					createdAt: new Date().toISOString(),
 				};
-				await setLobbyRecord(db, guildId, record);
+				await setLobbyRecord(guildId, record);
 			} catch (error) {
 				console.error("[linked-channel] lobby creation failed:", error);
 				return interaction.reply({
-					content: "❌ Could not create the lobby. Please try again later.",
+					content: [
+						"❌ **Could not create the lobby.**",
+						error instanceof DiscordRestApiError ? `• ${describeLobbyError(error)}` : "",
+						"Creating lobbies needs the bot token and an application enabled for the Social SDK.",
+					]
+						.filter(Boolean)
+						.join("\n"),
 					flags: MessageFlags.Ephemeral,
 				});
 			}
@@ -88,7 +106,7 @@ export const linkedChannelCommand = {
 		// needs a USER OAuth2 Bearer token carrying `sdk.social_layer` — the
 		// app's legacy connect flow (applications.commands identify guilds
 		// role_connections.write) is not enough, so linking would 403.
-		const storedToken = await getStoredUserToken(db, userId);
+		const storedToken = await getFreshUserToken(userId);
 		let reconnectUrl: string | null = null;
 		if (!storedToken || !hasSocialLayerScope(storedToken.scope)) {
 			const clientId = process.env.DISCORD_APPLICATION_ID;

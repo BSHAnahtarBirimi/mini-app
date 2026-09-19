@@ -1,9 +1,9 @@
 import { ChannelType, MessageFlags } from "@minesa-org/mini-interaction";
 import type { ComponentHandler } from "@minesa-org/mini-interaction";
 
-import { db } from "../utils/database.js";
 import { getLobbyRecord } from "../utils/lobby-store.js";
 import { setPendingLink } from "../utils/linked-channel-state.js";
+import { classifyChannelPrivacy } from "../utils/channel-privacy.js";
 import type { ChannelPrivacy, ChannelOverwrite } from "../utils/channel-privacy.js";
 
 /**
@@ -31,7 +31,7 @@ export const pickChannelSelect = {
 			});
 		}
 
-		const record = await getLobbyRecord(db, guildId);
+		const record = await getLobbyRecord(guildId);
 		if (!record) {
 			return interaction.reply({
 				content: "❌ No lobby found for this server. Run `/linked-channel` first.",
@@ -60,7 +60,6 @@ export const pickChannelSelect = {
 		const maybeOverwrites = (resolved as { permission_overwrites?: unknown } | undefined)
 			?.permission_overwrites;
 		if (resolved && Array.isArray(maybeOverwrites)) {
-			const { classifyChannelPrivacy } = await import("../utils/channel-privacy.js");
 			privacy = classifyChannelPrivacy(
 				{
 					type: ChannelType.GuildText,
@@ -70,7 +69,9 @@ export const pickChannelSelect = {
 			);
 		}
 
-		setPendingLink(userId, guildId, {
+		// Persisted rather than kept in memory: the "Link anyway" press is often
+		// served by a different serverless instance than this select.
+		await setPendingLink(userId, guildId, {
 			channelId,
 			channelName,
 			privacy,

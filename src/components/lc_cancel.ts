@@ -11,7 +11,7 @@ export const cancelLinkButton = {
 		const guildId = interaction.guild_id;
 		const userId = interaction.member?.user?.id ?? interaction.user?.id;
 		if (guildId && userId) {
-			clearPendingLink(userId, guildId);
+			await clearPendingLink(userId, guildId);
 		}
 
 		return interaction.reply({

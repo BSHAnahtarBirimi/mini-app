@@ -34,11 +34,7 @@ export type ClassifiedChannel = {
 };
 
 /** Fetches and classifies a guild's text channels for the select menu. */
-export async function listGuildChannelsForMenu(
-	guildId: string,
-	botToken: string,
-): Promise<ClassifiedChannel[]> {
-	void botToken; // auth is handled centrally by DiscordRestClient
+export async function listGuildChannelsForMenu(guildId: string): Promise<ClassifiedChannel[]> {
 	const channels = await listGuildChannels(guildId);
 
 	return channels
