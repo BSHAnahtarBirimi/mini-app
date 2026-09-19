@@ -250,6 +250,21 @@ export function listGuildChannels(guildId: string) {
 }
 
 /**
+ * Lists the servers the bot is a member of (bot auth).
+ *
+ * This is the app's own view of its servers, and the only way to enumerate the
+ * guilds it may have a linked channel in: `MiniDatabase` can only read a key you
+ * already know, so a stored index of guilds is blind to everything written
+ * before it existed (or by an older deployment). Asking Discord, then reading
+ * `lc:${guildId}` for each server, always sees every lobby the app manages.
+ */
+export function listBotGuilds(): Promise<{ id: string; name?: string }[]> {
+	return call("list the bot's servers", (client) =>
+		client.request<{ id: string; name?: string }[]>("/users/@me/guilds"),
+	);
+}
+
+/**
  * Extracts Discord's human-readable error message from a `DiscordRestApiError`
  * body (`{"message": "...", "code": n}`), falling back to the raw status.
  */

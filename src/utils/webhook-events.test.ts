@@ -10,12 +10,15 @@ import {
 import type { WebhookEventPayload } from "@minesa-org/mini-interaction";
 
 import {
+	candidateGuilds,
 	deauthorizationMessage,
 	deliveryKeyOf,
 	notifyLinkedChannelsOfDeauthorization,
 	summarizeEvent,
 } from "./webhook-events.ts";
 import type { DeauthorizeDeps } from "./webhook-events.ts";
+import { setLobbyFetchImplementation } from "./lobby-api.ts";
+import { unionGuilds } from "./lobby-store.ts";
 
 /**
  * `APPLICATION_DEAUTHORIZED` is the only out-of-game signal that a Social SDK
@@ -59,8 +62,22 @@ function recordingDeps(overrides: Partial<DeauthorizeDeps> = {}) {
 	return { deps, sent, deleted };
 }
 
-test("a deauthorized user's token is dropped and their linked channel is told", async () => {
-	const { deps, sent, deleted } = recordingDeps();
+test("every linked channel is told, not only the one that user linked", async () => {
+	const { deps, sent, deleted } = recordingDeps({
+		listGuilds: async () => [
+			"1525905980422885406",
+			"1550970322860384317",
+			"111111111111111111",
+		],
+		getLobbyRecord: async (guildId) =>
+			guildId === "111111111111111111"
+				? null
+				: { lobbyId: `lobby-${guildId}`, creatorId: "285118390031351809" },
+		sendChannelMessage: async (channelId, content) => {
+			sent.push({ channelId, content });
+			return { id: "1" };
+		},
+	});
 
 	const outcome = await notifyLinkedChannelsOfDeauthorization(
 		{ id: "285118390031351809", username: "tester" },
@@ -68,18 +85,51 @@ test("a deauthorized user's token is dropped and their linked channel is told", 
 	);
 
 	assert.deepEqual(deleted, ["285118390031351809"], "the dead connection must be forgotten");
-	assert.deepEqual(outcome.notified, [
-		{ guildId: "1525905980422885406", channelId: "1525905982000070780" },
-	]);
-	assert.equal(sent.length, 1);
-	assert.equal(sent[0]?.channelId, "1525905982000070780");
+	assert.deepEqual(
+		outcome.notified.map((entry) => entry.guildId),
+		["1525905980422885406", "1550970322860384317"],
+		"a second server with a linked channel must be told as well",
+	);
+	assert.equal(sent.length, 2);
 	assert.match(sent[0]?.content ?? "", /tester/);
 	assert.match(sent[0]?.content ?? "", /Reconnect Discord/);
 	assert.deepEqual(
-		outcome.ownedGuilds,
-		["1525905980422885406"],
-		"only lobbies that user owns are told — never a server they merely visited",
+		outcome.considered,
+		["1525905980422885406", "1550970322860384317", "111111111111111111"],
+		"every candidate is examined even when it has no lobby",
 	);
+});
+
+test("guild candidates come from Discord, so an unindexed lobby still counts", async () => {
+	// The event payload has a user id and nothing else, and a write-time index
+	// cannot see lobbies created before it existed — Discord's own answer can.
+	setLobbyFetchImplementation((async (url: string) =>
+		String(url).endsWith("/users/@me/guilds")
+			? new Response(JSON.stringify([{ id: "1550970322860384317", name: "second" }]), {
+					status: 200,
+					headers: { "content-type": "application/json" },
+				})
+			: new Response("{}", { status: 404 })) as never);
+	try {
+		assert.deepEqual(await candidateGuilds(), ["1550970322860384317"]);
+	} finally {
+		setLobbyFetchImplementation(undefined);
+	}
+});
+
+test("candidates are merged without duplicates", () => {
+	assert.deepEqual(unionGuilds(["a", "b"], ["b", "c", ""]), ["a", "b", "c"]);
+});
+
+test("a channel linked by someone else is still told (the notice is not user-scoped)", async () => {
+	const { deps, sent } = recordingDeps({
+		getLobbyRecord: async (guildId) => ({ lobbyId: `lobby-${guildId}`, creatorId: "someone-else" }),
+	});
+
+	const outcome = await notifyLinkedChannelsOfDeauthorization({ id: "285118390031351809" }, deps);
+
+	assert.equal(sent.length, 2, "both servers have a linked channel to post into");
+	assert.deepEqual(outcome.ownedByUser, [], "this user owns neither link");
 });
 
 test("the connection is dropped even when there is nothing to notify", async () => {
@@ -97,9 +147,10 @@ test("the connection is dropped even when there is nothing to notify", async () 
 });
 
 test("a lobby without a linked channel is reported, not treated as a failure", async () => {
+	const bothGuilds = ["1525905980422885406", "999999999999999999"];
 	const { deps, sent } = recordingDeps({ readLinkedChannelId: async () => null });
 	const outcome = await notifyLinkedChannelsOfDeauthorization({ id: "285118390031351809" }, deps);
-	assert.deepEqual(outcome.withoutLinkedChannel, ["1525905980422885406"]);
+	assert.deepEqual(outcome.withoutLinkedChannel, bothGuilds, "every lobby is checked, even without a link");
 	assert.equal(sent.length, 0);
 	// A lobby whose id was reaped must not stop the notification either.
 	const reaped = recordingDeps({
@@ -111,7 +162,7 @@ test("a lobby without a linked channel is reported, not treated as a failure", a
 		{ id: "285118390031351809" },
 		reaped.deps,
 	);
-	assert.deepEqual(reapedOutcome.withoutLinkedChannel, ["1525905980422885406"]);
+	assert.deepEqual(reapedOutcome.withoutLinkedChannel, bothGuilds);
 });
 
 test("the notice names the user and explains that linking stops working", () => {
@@ -120,7 +171,7 @@ test("the notice names the user and explains that linking stops working", () => 
 	assert.match(message, /Reconnect Discord/);
 	assert.match(message, /still read and post/, "members keep the channel");
 	assert.doesNotMatch(message, /<@1>/, "a notification must not ping the user");
-	assert.match(deauthorizationMessage({ id: "1" }), /The account that linked/);
+	assert.match(deauthorizationMessage({ id: "1" }), /A member/);
 });
 
 test("event summaries describe what arrived, for /api/diag", () => {
