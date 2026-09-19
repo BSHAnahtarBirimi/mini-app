@@ -12,6 +12,7 @@ endpoint file.
 | `api/interactions.ts` | Vercel endpoint — 3 lines, auto-discovers all handlers |
 | `api/index.ts` | Linked-roles landing page (`index.html`) |
 | `api/discord-oauth-callback.ts` | OAuth2 callback: stores tokens in `MiniDatabase`, updates role metadata |
+| `api/diag.ts` | Read-only diagnostics: bot token, guild membership, registered commands |
 | `src/commands/ping.ts` | `/ping` — Components V2 container + section + button |
 | `src/commands/echo.ts` | `/echo` — typed option resolver demo |
 | `src/components/ping_button.ts` | Button → modal with a modal-side select menu |
@@ -23,7 +24,8 @@ endpoint file.
 | `src/utils/lobby-api.ts` | Lobby API wrappers over the package's `DiscordRestClient` (fail-fast: `maxRetries: 0`) |
 | `src/utils/lobby-store.ts` | Per-guild lobby records on `MiniDatabase` (`lc:${guildId}`) |
 | `src/utils/channel-privacy.ts` | Pure privacy classifier for `permission_overwrites` |
-| `scripts/register.ts` | Auto-discovers and registers commands + linked-role metadata |
+| `scripts/register.ts` | Auto-discovers and registers commands + linked-role metadata (manual run) |
+| `scripts/register-deploy.ts` | Same registration, executed by production deploys |
 
 ## 1. Prepare
 
@@ -34,12 +36,28 @@ cp env.example .env   # then fill in the values
 
 ## 2. Register commands & metadata
 
+Registration is **automatic on production deploys** — the Vercel build runs
+`npm run register:deploy`, which PUTs the discovered commands with the
+deployment's own credentials. Nothing has to be done locally, and a deployment
+can no longer ship with zero registered commands.
+
+The same step can be run by hand:
+
 ```bash
 npm run register
 ```
 
 Set `DISCORD_GUILD_ID` to register instantly on one guild; leave it unset for
-global registration.
+global registration (Discord can take up to an hour to publish global
+commands). Both paths refuse to send an empty command list, because that PUT
+*wipes* every registered command.
+
+> [!IMPORTANT]
+> Commands are only visible in a server when the app is installed there **with
+the `applications.commands` scope**. Invite it with
+`https://discord.com/oauth2/authorize?client_id=<APPLICATION_ID>&scope=bot+applications.commands`
+(the ready-made link is in `/api/diag`) — the linked-roles OAuth flow on the
+landing page does not add the bot to a server.
 
 ## 3. Deploy — Vercel
 
@@ -103,6 +121,15 @@ export const myModal = {
 
 That's it — `MiniInteraction` auto-discovers all files in `src/commands/`,
 `src/components/`, and `src/modals/`. No other registration needed.
+
+> [!IMPORTANT]
+> Handler files are imported **at runtime by Node**, which strips TypeScript
+types itself but does *not* rewrite module specifiers. Import shared code with
+the real extension — `import { getDb } from "../utils/database.ts"` — never
+`"./database.js"`. A `.js` specifier points at a file that does not exist in
+the deployment, and one unresolvable import rejects the whole module load, so
+**every** command and button stops responding while local tooling (tsx) keeps
+working. `src/utils/module-specifiers.test.ts` enforces this for `src/`.
 
 ## Handler API reference
 
@@ -171,6 +198,31 @@ node scripts/vendor-mini-interaction.mjs v0.15.0
 npm pkg set 'dependencies.@minesa-org/mini-interaction=file:vendor/mini-interaction-0.15.0.tgz'
 npm install
 ```
+
+## Diagnostics
+
+Vercel runtime logs need dashboard access, so the app answers the same
+questions itself. `GET /api/diag` returns JSON (no secrets — only *whether* an
+environment variable is set, never its value, plus public ids and the command
+names Discord already shows to everyone):
+
+| Field | Answers |
+| --- | --- |
+| `problems` | Why commands are missing / linking cannot work, in order |
+| `modules` | Whether handler discovery works in the deployment, and its error otherwise |
+| `bot` | Whether `DISCORD_BOT_TOKEN` is still accepted by Discord |
+| `guilds` | Which servers the bot is actually in |
+| `registered.global` / `registered.guild` | Which commands Discord currently has |
+| `channels`, `selectedChannel`, `lobby` | The Linked Channels channel menu with privacy verdicts, and the stored lobby |
+| `links.botInvite` | Invite URL with `scope=bot+applications.commands` |
+
+```bash
+curl "https://<your-app>/api/diag"
+curl "https://<your-app>/api/diag?guild=<GUILD_ID>&channel=<CHANNEL_ID>"
+```
+
+`ok: true` with an empty `problems` array means the deployment is healthy. The
+endpoint is read-only and never calls Discord as a user.
 
 ## Environment variables
 

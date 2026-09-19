@@ -8,6 +8,7 @@
 		"build": "tsc --noEmit",
 		"mi-vendor": "node scripts/vendor-mini-interaction.mjs",
 		"register": "tsx scripts/register.ts",
+		"register:deploy": "tsx scripts/register-deploy.ts",
 		"typecheck": "tsc --noEmit",
 		"test": "tsx --test $(find src -name '*.test.ts' -type f)"
 	},

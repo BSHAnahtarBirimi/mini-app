@@ -1,10 +1,10 @@
 import { ChannelType, MessageFlags } from "@minesa-org/mini-interaction";
 import type { ComponentHandler } from "@minesa-org/mini-interaction";
 
-import { getLobbyRecord } from "../utils/lobby-store.js";
-import { setPendingLink } from "../utils/linked-channel-state.js";
-import { classifyChannelPrivacy } from "../utils/channel-privacy.js";
-import type { ChannelPrivacy, ChannelOverwrite } from "../utils/channel-privacy.js";
+import { getLobbyRecord } from "../utils/lobby-store.ts";
+import { setPendingLink } from "../utils/linked-channel-state.ts";
+import { classifyChannelPrivacy } from "../utils/channel-privacy.ts";
+import type { ChannelPrivacy, ChannelOverwrite } from "../utils/channel-privacy.ts";
 
 /**
  * `lc:pick` — channel select handler. Stores the pick and shows the WARNING

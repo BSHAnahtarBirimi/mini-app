@@ -5,8 +5,8 @@ import {
 	PENDING_LINK_TTL_MS,
 	isFreshPendingLink,
 	parsePendingLink,
-} from "./linked-channel-state.js";
-import type { PendingLink } from "./linked-channel-state.js";
+} from "./linked-channel-state.ts";
+import type { PendingLink } from "./linked-channel-state.ts";
 
 const record = (overrides: Partial<PendingLink> = {}): PendingLink => ({
 	channelId: "1525905982000070780",

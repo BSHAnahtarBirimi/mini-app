@@ -10,7 +10,7 @@
 
 import { refreshAccessToken } from "@minesa-org/mini-interaction";
 
-import { getDb } from "./database.js";
+import { getDb } from "./database.ts";
 
 export type StoredUserToken = {
 	accessToken: string;

@@ -1,10 +1,10 @@
 import { MessageFlags } from "@minesa-org/mini-interaction";
 import type { ComponentHandler } from "@minesa-org/mini-interaction";
 
-import { getLobbyRecord } from "../utils/lobby-store.js";
-import { getFreshUserToken } from "../utils/lobby-tokens.js";
-import { hasSocialLayerScope } from "../utils/lobby-oauth.js";
-import { createLobbyChannelInviteForSelf, describeLobbyError, DiscordRestApiError } from "../utils/lobby-api.js";
+import { getLobbyRecord } from "../utils/lobby-store.ts";
+import { getFreshUserToken } from "../utils/lobby-tokens.ts";
+import { hasSocialLayerScope } from "../utils/lobby-oauth.ts";
+import { createLobbyChannelInviteForSelf, describeLobbyError, DiscordRestApiError } from "../utils/lobby-api.ts";
 
 /**
  * `lc:join` — "Join Discord server" button.

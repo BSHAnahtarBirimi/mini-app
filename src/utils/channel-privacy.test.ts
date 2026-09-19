@@ -7,8 +7,8 @@ import {
 	classifyChannelPrivacy,
 	classifyEveryoneOverwrite,
 	hasRestrictiveOverwrites,
-} from "./channel-privacy.js";
-import type { ChannelOverwrite } from "./channel-privacy.js";
+} from "./channel-privacy.ts";
+import type { ChannelOverwrite } from "./channel-privacy.ts";
 
 const GUILD_ID = "123456789012345678";
 const VIEW = MiniPermFlags.ViewChannel.toString();

@@ -12,9 +12,9 @@
 
 import { ChannelType } from "@minesa-org/mini-interaction";
 
-import { classifyChannelPrivacy } from "./channel-privacy.js";
-import type { ChannelPrivacy } from "./channel-privacy.js";
-import { listGuildChannels } from "./lobby-api.js";
+import { classifyChannelPrivacy } from "./channel-privacy.ts";
+import type { ChannelPrivacy } from "./channel-privacy.ts";
+import { listGuildChannels } from "./lobby-api.ts";
 
 /** Minimal structural shape of the guild channel payload we classify. */
 export type ClassifiableGuildChannel = {

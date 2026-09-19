@@ -13,10 +13,10 @@ import {
 import type { MessageActionRowComponent } from "@minesa-org/mini-interaction";
 import type { ComponentHandler } from "@minesa-org/mini-interaction";
 
-import { getLobbyRecord } from "../utils/lobby-store.js";
-import { listGuildChannelsForMenu, buildChannelMenuOptions } from "../utils/lobby-channels.js";
-import { hasSocialLayerScope } from "../utils/lobby-oauth.js";
-import { getFreshUserToken } from "../utils/lobby-tokens.js";
+import { getLobbyRecord } from "../utils/lobby-store.ts";
+import { listGuildChannelsForMenu, buildChannelMenuOptions } from "../utils/lobby-channels.ts";
+import { hasSocialLayerScope } from "../utils/lobby-oauth.ts";
+import { getFreshUserToken } from "../utils/lobby-tokens.ts";
 
 /**
  * `lc:link` — shows the channel select menu for linking.
