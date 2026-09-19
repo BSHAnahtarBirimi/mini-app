@@ -22,6 +22,23 @@ const ENV = {
 	DISCORD_REDIRECT_URI: "https://example.test/api/discord-oauth-callback",
 } as NodeJS.ProcessEnv;
 
+/**
+ * Test isolation. A handler that throws records the failure in the database it
+ * is configured with, and the development environment points at the
+ * deployment's real one — so a test that deliberately provokes a failure would
+ * plant a fake entry in the live diagnostics log (and `/api/diag` would then
+ * report a problem that never happened).
+ */
+async function withoutDatabase<T>(action: () => Promise<T>): Promise<T> {
+	const saved = process.env.MONGODB_URI;
+	delete process.env.MONGODB_URI;
+	try {
+		return await action();
+	} finally {
+		if (saved !== undefined) process.env.MONGODB_URI = saved;
+	}
+}
+
 type AnyNode = {
 	type?: number;
 	style?: number;
@@ -145,7 +162,7 @@ async function run(
 	};
 
 	const handler = createAuthorizeHandler(deps) as unknown as (i: unknown) => Promise<unknown>;
-	await handler(interaction);
+	await withoutDatabase(() => handler(interaction));
 
 	return { calls, deferred, replies, cleared, saved };
 }

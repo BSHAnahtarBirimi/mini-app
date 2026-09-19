@@ -32,9 +32,20 @@ function fakeResponse(): FakeResponse {
 	return res;
 }
 
+/**
+ * Runs the endpoint without a configured database: diagnostics read the
+ * deployment's failure log from it, and a test must not depend on — or add to —
+ * what happens to be in the live one.
+ */
 async function diag(query: string): Promise<Record<string, unknown>> {
+	const saved = process.env.MONGODB_URI;
+	delete process.env.MONGODB_URI;
 	const res = fakeResponse();
-	await handleDiag({ method: "GET", url: `/api/diag${query}`, headers: {} }, res);
+	try {
+		await handleDiag({ method: "GET", url: `/api/diag${query}`, headers: {} }, res);
+	} finally {
+		if (saved !== undefined) process.env.MONGODB_URI = saved;
+	}
 	assert.equal(res.statusCode, 200, "diagnostics must always answer");
 	return JSON.parse(res.body) as Record<string, unknown>;
 }
