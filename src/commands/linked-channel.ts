@@ -1,16 +1,13 @@
-import {
-	CommandBuilder,
-	LobbyMemberFlags,
-	MessageFlags,
-} from "@minesa-org/mini-interaction";
+import { CommandBuilder, MessageFlags } from "@minesa-org/mini-interaction";
 import type { SlashCommandHandler } from "@minesa-org/mini-interaction";
 
 import {
 	DATABASE_NOT_CONFIGURED_MESSAGE,
 	hasDatabaseConfig,
 } from "../utils/database.ts";
-import { getLobbyRecord, setLobbyRecord } from "../utils/lobby-store.ts";
-import { createLobby, describeLobbyError, DiscordRestApiError } from "../utils/lobby-api.ts";
+import { getLobbyRecord } from "../utils/lobby-store.ts";
+import { describeLobbyError, DiscordRestApiError } from "../utils/lobby-api.ts";
+import { provisionLobby } from "../utils/lobby-lifecycle.ts";
 import { hasSocialLayerScope, buildSocialSdkOAuthUrl } from "../utils/lobby-oauth.ts";
 import { getFreshUserToken } from "../utils/lobby-tokens.ts";
 import { buildPanelPayloads } from "../utils/linked-channel-panel.ts";
@@ -75,7 +72,9 @@ export const linkedChannelCommand = {
 
 			// Auto-provision: create the lobby once per guild with the invoking
 			// admin as a member carrying CanLinkLobby (1 << 0). Without that
-			// flag a member can neither link nor unlink channels.
+			// flag a member can neither link nor unlink channels. Lobbies are
+			// session objects, so an expired one is replaced on use rather than
+			// being trusted (see lobby-lifecycle.ts).
 			let record = await getLobbyRecord(guildId);
 			if (!record) {
 				const applicationId = process.env.DISCORD_APPLICATION_ID;
@@ -86,15 +85,7 @@ export const linkedChannelCommand = {
 					});
 				}
 				try {
-					const lobby = await createLobby([
-						{ id: userId, flags: LobbyMemberFlags.CanLinkLobby },
-					]);
-					record = {
-						lobbyId: lobby.id,
-						creatorId: userId,
-						createdAt: new Date().toISOString(),
-					};
-					await setLobbyRecord(guildId, record);
+					record = await provisionLobby(guildId, [userId]);
 				} catch (error) {
 					console.error("[linked-channel] lobby creation failed:", error);
 					await recordInteractionError(error, "linked-channel:create-lobby");

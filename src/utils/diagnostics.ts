@@ -63,6 +63,12 @@ export type DiagInput = {
 	 * "«bot» is thinking…" state, so it is reported like any other problem.
 	 */
 	payloads?: { ok: boolean; errors: string[] };
+	/**
+	 * Whether the stored lobby still exists on Discord's side (bot-token read).
+	 * Lobbies are session objects that Discord reaps when idle, so a stored id
+	 * is not durable — `404 Unknown Lobby` on the next link is exactly this.
+	 */
+	lobbyState?: Probe<{ id: string; linkedChannelId: string | null }>;
 };
 
 /** True when a probe was rejected by Discord for a bad/expired token. */
@@ -173,7 +179,16 @@ export function deriveProblems(input: DiagInput): string[] {
 		}
 	}
 
-	// 8. Linked Channels extras.
+	// 8. A stored lobby that Discord no longer knows about is not a bug to fix by
+	//    hand — it is how lobbies work — but it must not look like the app is
+	//    broken when a link answers "Unknown Lobby".
+	if (input.lobbyState && !input.lobbyState.ok) {
+		problems.push(
+			`The stored lobby no longer exists on Discord's side (${input.lobbyState.status ?? "?"} ${input.lobbyState.error ?? ""}) — lobbies are session objects Discord reaps when idle, and a fresh one is created automatically the next time a channel is linked.`,
+		);
+	}
+
+	// 9. Linked Channels extras.
 	if (input.userToken) {
 		if (!input.userToken.connected) {
 			problems.push(

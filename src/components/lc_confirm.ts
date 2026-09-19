@@ -2,10 +2,12 @@ import { MessageFlags } from "@minesa-org/mini-interaction";
 import type { ComponentHandler } from "@minesa-org/mini-interaction";
 
 import { getLobbyRecord } from "../utils/lobby-store.ts";
+import type { LobbyRecord } from "../utils/lobby-store.ts";
 import { getPendingLink, clearPendingLink } from "../utils/linked-channel-state.ts";
 import { getFreshUserToken } from "../utils/lobby-tokens.ts";
 import { hasSocialLayerScope } from "../utils/lobby-oauth.ts";
 import { linkChannelToLobby, describeLobbyError, DiscordRestApiError } from "../utils/lobby-api.ts";
+import { isUnknownLobbyError, provisionLobby } from "../utils/lobby-lifecycle.ts";
 
 /**
  * `lc:confirm` — performs the actual channel link after the warning step.
@@ -33,12 +35,7 @@ export const confirmLinkButton = {
 			return interaction.editReply({ content: "❌ This only works inside a server." });
 		}
 
-		const record = await getLobbyRecord(guildId);
-		if (!record) {
-			return interaction.editReply({
-				content: "❌ No lobby found for this server. Run `/linked-channel` first.",
-			});
-		}
+		const stored = await getLobbyRecord(guildId);
 
 		const pending = await getPendingLink(userId, guildId);
 		if (!pending || pending.channelId === "") {
@@ -65,12 +62,11 @@ export const confirmLinkButton = {
 		}
 
 		try {
-			// Single attempt — no retry loop (20 calls / 2 h per app).
-			const lobby = await linkChannelToLobby(
-				record.lobbyId,
-				pending.channelId,
-				storedToken.accessToken,
-			);
+			// The lobby is a session object: Discord reaps it when it goes idle, and
+			// the id stored when the panel ran can already be gone. Recover once —
+			// create a fresh lobby with this admin carrying CanLinkLobby and retry
+			// the link a single time. Never a loop (20 link calls / 2 h per app).
+			const lobby = await linkWithLobby(guildId, stored, pending.channelId, userId, storedToken.accessToken);
 
 			const channelMention = pending.channelName
 				? `**#${pending.channelName}**`
@@ -93,7 +89,9 @@ export const confirmLinkButton = {
 						"❌ **Discord rejected the link.**",
 						`• ${describeLobbyError(error)}`,
 						"",
-						"Common causes: missing `sdk.social_layer` scope on your connection, missing CanLinkLobby lobby flag, lacking Manage Channels / View / Send permissions on the channel, the channel being already linked, or the development cap of **20 link calls per 2 hours** being exhausted. The request was **not** retried.",
+						error.status === 403
+							? "403 usually means the `openid sdk.social_layer` scope is missing on your connection, or `CanLinkLobby` is not set for your lobby member, or you lack Manage Channels / View Channel / Send Messages on the channel. The request was **not** retried."
+							: "Common causes: missing `sdk.social_layer` scope on your connection, missing CanLinkLobby lobby flag, lacking Manage Channels / View / Send permissions on the channel, or the development cap of **20 link calls per 2 hours** being exhausted. The request was **not** retried.",
 					].join("\n"),
 				});
 			}
@@ -107,3 +105,34 @@ export const confirmLinkButton = {
 		}
 	}) satisfies ComponentHandler,
 };
+
+/**
+ * Links the channel, re-creating the lobby once when the stored one is gone.
+ *
+ * Returns the lobby Discord answered with (which may be the fresh one). Throws
+ * the original error when the re-created lobby is refused as well — at that
+ * point the problem is not the lobby's lifetime, and the caller reports it.
+ */
+async function linkWithLobby(
+	guildId: string,
+	stored: LobbyRecord | null,
+	channelId: string,
+	userId: string,
+	userToken: string,
+) {
+	if (stored) {
+		try {
+			return await linkChannelToLobby(stored.lobbyId, channelId, userToken);
+		} catch (error) {
+			// Anything other than an unknown lobby is a real answer from Discord
+			// (permissions, scope, rate limit) and must reach the admin as-is.
+			if (!isUnknownLobbyError(error)) throw error;
+			console.log(`[lc:confirm] lobby ${stored.lobbyId} is unknown — re-creating it`);
+		}
+	}
+
+	// Expired or never created: provision a current lobby with this admin able
+	// to link, and keep the original creator able to as well.
+	const fresh = await provisionLobby(guildId, [userId, ...(stored ? [stored.creatorId] : [])]);
+	return await linkChannelToLobby(fresh.lobbyId, channelId, userToken);
+}

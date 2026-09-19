@@ -5,6 +5,7 @@ import { getLobbyRecord, deleteLobbyRecord } from "../utils/lobby-store.ts";
 import { getFreshUserToken } from "../utils/lobby-tokens.ts";
 import { hasSocialLayerScope } from "../utils/lobby-oauth.ts";
 import { unlinkChannelFromLobby, describeLobbyError, DiscordRestApiError } from "../utils/lobby-api.ts";
+import { isUnknownLobbyError } from "../utils/lobby-lifecycle.ts";
 
 /**
  * `lc:unlink` — removes the channel link from the guild's lobby.
@@ -47,6 +48,10 @@ export const unlinkButton = {
 			});
 		}
 
+		// A lobby is a session object that Discord reaps when idle, so a stored id
+		// can already be unknown. Nothing is linked in that case — clearing the
+		// record is the whole operation, and reporting it as a failure would be
+		// noise (the admin cannot unlink what no longer exists).
 		try {
 			await unlinkChannelFromLobby(record.lobbyId, storedToken.accessToken);
 			await deleteLobbyRecord(guildId);
@@ -55,14 +60,23 @@ export const unlinkButton = {
 				content: "✅ **Unlinked.** The lobby no longer forwards messages to any Discord channel.",
 			});
 		} catch (error) {
+			if (isUnknownLobbyError(error)) {
+				await deleteLobbyRecord(guildId);
+				return interaction.editReply({
+					content: [
+						"✅ **Nothing was linked.** The stored lobby no longer exists on Discord's side — lobbies are re-created when needed, so this is expected after they go idle.",
+						"The local record has been cleared.",
+					].join("\n"),
+				});
+			}
 			if (error instanceof DiscordRestApiError) {
 				console.error("[lc:unlink] unlink failed:", error.status, error.body);
-				return interaction.editReply({
+					return interaction.editReply({
 					content: [
 						"❌ **Discord rejected the unlink.**",
 						`• ${describeLobbyError(error)}`,
 						"",
-						"Common causes: missing `sdk.social_layer` scope, missing CanLinkLobby lobby flag, no link present, or the development cap of **20 calls per 2 hours** being exhausted. The request was **not** retried.",
+						"403 usually means `CanLinkLobby` is not set for your lobby member, or the `openid sdk.social_layer` scope is missing on your connection. The request was **not** retried.",
 					].join("\n"),
 				});
 			}

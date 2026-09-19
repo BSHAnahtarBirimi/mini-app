@@ -175,6 +175,15 @@ Lobby API (see `docs.discord.com/developers/resources/lobby`):
 - The panel auto-creates a per-guild lobby with the invoking admin as a member
   carrying `CanLinkLobby` (`1 << 0`) — without that flag nobody can link **or**
   unlink. The lobby id is persisted in `MiniDatabase` as `lc:${guildId}`.
+- **A lobby is a session object, not durable state.** Discord reaps it when it
+  goes idle (the create call takes `idle_timeout_seconds`), so a stored id can
+  already be gone when a link is attempted, and Discord answers
+  **`404 Unknown Lobby`**. That is recovered from automatically: the lobby is
+  re-created — with the acting admin carrying `CanLinkLobby` — and the operation
+  is retried **exactly once** (`src/utils/lobby-lifecycle.ts`). Unlinking or
+  inviting against a lobby that no longer exists says so instead of reporting a
+  Discord failure. `GET /api/diag?guild=…` reports `lobbyState` so you can see
+  whether the stored lobby is still alive.
 - **Link a channel** fetches the guild's text channels with the bot token and
   shows a labelled `StringSelect` (Discord channel select menus have no
   per-option labels, so privacy badges are computed from
@@ -197,7 +206,8 @@ The panel and the components answer with the reason instead of failing
 silently: `MONGODB_URI` missing (nothing can be persisted), a stored token
 without `sdk.social_layer` (press **Reconnect Discord**), a lobby whose member
 lacks `CanLinkLobby`, missing Manage Channels / View Channel / Send Messages on
-the chosen channel, or the 20-calls-per-2-hours development cap. User tokens
+the chosen channel, an expired lobby (re-created automatically on the next
+link), or the 20-calls-per-2-hours development cap. User tokens
 expire after ~7 days and are refreshed automatically from the stored refresh
 token. The picked channel is persisted in `MiniDatabase`
 (`lc-pending:${userId}:${guildId}`, 10 minute TTL) because consecutive
@@ -243,6 +253,7 @@ names Discord already shows to everyone):
 | `registered.global` / `registered.guild` | Which commands Discord currently has |
 | `channels`, `selectedChannel`, `lobby` | The Linked Channels channel menu with privacy verdicts, and the stored lobby |
 | `recentFailures` | The last handler failures, which is why a message stayed on "«bot» is thinking…" |
+| `lobbyState` | Whether the stored lobby still exists on Discord's side (and its linked channel) |
 | `payloads` | Whether the Linked Channels messages can be serialised at all |
 | `filesystem` (`?fs=1`) | The function's `cwd` and which runtime paths actually exist |
 | `links.botInvite` | Invite URL with `scope=bot+applications.commands` |

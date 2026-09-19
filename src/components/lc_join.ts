@@ -5,6 +5,7 @@ import { getLobbyRecord } from "../utils/lobby-store.ts";
 import { getFreshUserToken } from "../utils/lobby-tokens.ts";
 import { hasSocialLayerScope } from "../utils/lobby-oauth.ts";
 import { createLobbyChannelInviteForSelf, describeLobbyError, DiscordRestApiError } from "../utils/lobby-api.ts";
+import { isUnknownLobbyError } from "../utils/lobby-lifecycle.ts";
 
 /**
  * `lc:join` — "Join Discord server" button.
@@ -63,6 +64,16 @@ export const joinServerButton = {
 				].join("\n"),
 			});
 		} catch (error) {
+			// Lobbies are session objects: an id stored when the panel ran may have
+			// been reaped, and there is no invite to hand out for a lobby that no
+			// longer exists. Say that instead of reporting a Discord failure.
+			if (isUnknownLobbyError(error)) {
+				return interaction.editReply({
+					content: [
+						"⌛ **This lobby no longer exists on Discord's side.** Lobbies are re-created when a channel is linked, so run `/linked-channel` and link a channel again.",
+					].join("\n"),
+				});
+			}
 			if (error instanceof DiscordRestApiError) {
 				console.error("[lc:join] invite failed:", error.status, error.body);
 				return interaction.editReply({

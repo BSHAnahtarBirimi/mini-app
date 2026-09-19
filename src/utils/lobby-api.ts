@@ -75,6 +75,18 @@ export async function createLobbyChannelInviteForSelf(
 	return rest().createLobbyChannelInviteForSelf(lobbyId, userToken);
 }
 
+/**
+ * Reads a lobby (bot auth).
+ *
+ * Used to check whether the stored lobby still exists: lobbies are session
+ * objects that Discord reaps when idle, and a stale id is answered with
+ * `404 Unknown Lobby` on the next link attempt (`GET /api/diag?guild=…` reports
+ * this).
+ */
+export async function getLobby(lobbyId: string): Promise<APILobby> {
+	return rest().getLobby(lobbyId);
+}
+
 /** Lists a guild's channels (bot auth) — used to build the channel menu. */
 export async function listGuildChannels(guildId: string) {
 	return rest().listGuildChannels(guildId);

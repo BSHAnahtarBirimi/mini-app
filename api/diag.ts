@@ -42,7 +42,7 @@ import { listGuildChannelsForMenu } from "../src/utils/lobby-channels.js";
 import type { ClassifiedChannel } from "../src/utils/lobby-channels.js";
 import { getLobbyRecord } from "../src/utils/lobby-store.js";
 import type { LobbyRecord } from "../src/utils/lobby-store.js";
-import { describeLobbyError } from "../src/utils/lobby-api.js";
+import { describeLobbyError, getLobby } from "../src/utils/lobby-api.js";
 import { describeError, getInteractionErrors } from "../src/utils/interaction-errors.js";
 import {
 	buildChannelMenuPayloads,
@@ -258,6 +258,20 @@ export default async function handler(req: DiagRequest, res: DiagResponse): Prom
 		? await probe(() => getLobbyRecord(guildId))
 		: ({ ok: false, error: "pass ?guild=<id> to inspect a server" } as Probe<LobbyRecord>);
 
+	// Lobbies are session objects that Discord reaps when idle, so the stored id
+	// can be gone by the time a link is attempted — which Discord answers with
+	// "404 Unknown Lobby" on the channel-linking call. Reading it with the bot
+	// token separates "the lobby expired" from "this call is not allowed".
+	const lobbyState = lobby.ok && lobby.data
+		? await probe(async () => {
+				const live = await getLobby(lobby.data!.lobbyId);
+				return {
+					id: live.id,
+					linkedChannelId: live.linked_channel?.id ?? null,
+				};
+			})
+		: undefined;
+
 	// Read-only: deliberately `getStoredUserToken` rather than the refreshing
 	// helper, so a diagnostic can never rotate a user's tokens.
 	const userId = url.searchParams.get("user");
@@ -289,6 +303,7 @@ export default async function handler(req: DiagRequest, res: DiagResponse): Prom
 			error: modules.error,
 		},
 		recentFailures,
+		lobbyState,
 		expectedCommands: modules.expectedCommands,
 		bot,
 		guilds,
@@ -324,6 +339,7 @@ export default async function handler(req: DiagRequest, res: DiagResponse): Prom
 		channels,
 		selectedChannel,
 		lobby,
+		lobbyState,
 		links: {
 			botInvite: applicationId ? buildBotInviteUrl(applicationId) : null,
 			socialSdkOAuth:
