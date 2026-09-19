@@ -14,6 +14,10 @@
 			"maxDuration": 15,
 			"includeFiles": "src/**"
 		},
+		"api/discord-events.ts": {
+			"maxDuration": 15,
+			"includeFiles": "src/**"
+		},
 		"api/diag.ts": {
 			"maxDuration": 15,
 			"includeFiles": "src/**"

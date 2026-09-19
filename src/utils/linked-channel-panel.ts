@@ -61,6 +61,21 @@ const unlinkButton = () =>
 const joinButton = () =>
 	new ButtonBuilder().setStyle(ButtonStyle.Primary).setCustomId("lc:join").setLabel("🏠 Join Discord server");
 
+/**
+ * Posts a message through the lobby, as a game does.
+ *
+ * The linked-channel experience itself lives inside a Social SDK client, so
+ * this is the only way to see the link work from Discord: the message is sent
+ * with the calling user's token and lands in the linked channel. It is also the
+ * quickest "is this link actually alive?" check — a lobby without a linked
+ * channel is refused by Discord.
+ */
+const testButton = () =>
+	new ButtonBuilder()
+		.setStyle(ButtonStyle.Secondary)
+		.setCustomId("lc:test")
+		.setLabel("✉️ Send a test message");
+
 const reconnectButton = (url: string) =>
 	new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel("🔁 Reconnect Discord").setURL(url);
 
@@ -97,7 +112,9 @@ const manageText = (lobbyId: string) =>
 		"### 🛠️ Manage the link",
 		`**Lobby:** \`${lobbyId}\``,
 		"Linking requires Manage Channels, View Channel and Send",
-		"Messages permissions on the chosen channel.",
+		"Messages permissions on the chosen channel. **Send a test",
+		"message** posts into the linked channel from the lobby — the",
+		"same call a game makes.",
 	].join("\n");
 
 /** The `/linked-channel` panel: link, unlink, join, and Reconnect when needed. */
@@ -118,7 +135,7 @@ export function buildPanelPayloads(data: LinkedChannelPanelData): EditablePayloa
 	}
 
 	container.addComponent(text(manageText(data.lobbyId)));
-	container.addComponent(row(linkButton(), unlinkButton()));
+	container.addComponent(row(linkButton(), unlinkButton(), testButton()));
 
 	container.addComponent(divider());
 	container.addComponent(text(COMMUNITY));
@@ -138,7 +155,7 @@ export function buildPanelPayloads(data: LinkedChannelPanelData): EditablePayloa
 		legacy: {
 			content: legacyContent,
 			components: [
-				row(linkButton(), unlinkButton()),
+				row(linkButton(), unlinkButton(), testButton()),
 				...(data.reconnectUrl ? [row(reconnectButton(data.reconnectUrl))] : []),
 				row(joinButton()),
 			],

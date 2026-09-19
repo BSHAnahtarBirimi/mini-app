@@ -11,6 +11,41 @@ import { getDb } from "./database.ts";
 
 export const lobbyKeyFor = (guildId: string) => `lc:${guildId}`;
 
+/**
+ * Index of the guilds this app has provisioned a lobby for.
+ *
+ * `MiniDatabase` can only read a key you already know, and the Webhook Events
+ * handler has to start from a *user* id (Discord's `APPLICATION_DEAUTHORIZED`
+ * payload carries the user and nothing else). Indexing the guilds on write is
+ * what lets it walk the lobbies it manages and find the ones whose link belongs
+ * to that user.
+ */
+export const LOBBY_GUILD_INDEX_KEY = "lc:guilds";
+
+/** Adds a guild to the index, keeping the newest entries first. */
+export function withGuild(list: string[], guildId: string, max = 200): string[] {
+	if (guildId === "") return list;
+	return [guildId, ...list.filter((id) => id !== guildId)].slice(0, max);
+}
+
+/**
+ * Records a guild in the index without touching its lobby record.
+ *
+ * Called wherever a stored lobby is read as well as written: records created
+ * before the index existed (or by an older deployment) would otherwise be
+ * invisible to the deauthorize webhook, which can only start from a user id.
+ */
+export async function indexLobbyGuild(guildId: string): Promise<void> {
+	await getDb().set(LOBBY_GUILD_INDEX_KEY, { guilds: withGuild(await listLobbyGuilds(), guildId) });
+}
+
+/** Every guild with a stored lobby record. */
+export async function listLobbyGuilds(): Promise<string[]> {
+	const raw = await getDb().get(LOBBY_GUILD_INDEX_KEY);
+	const guilds = raw?.guilds;
+	return Array.isArray(guilds) ? guilds.filter((id): id is string => typeof id === "string") : [];
+}
+
 export type LobbyRecord = {
 	/** Social SDK lobby id (snowflake as string — don't lose precision). */
 	lobbyId: string;
@@ -30,9 +65,17 @@ export async function getLobbyRecord(guildId: string): Promise<LobbyRecord | nul
 	return { lobbyId, creatorId, createdAt: String(raw.createdAt ?? "") };
 }
 
-/** Creates (or replaces) the guild's lobby record. */
-export function setLobbyRecord(guildId: string, record: LobbyRecord): Promise<boolean> {
-	return getDb().set(lobbyKeyFor(guildId), { ...record });
+/** Creates (or replaces) the guild's lobby record, indexing the guild. */
+export async function setLobbyRecord(guildId: string, record: LobbyRecord): Promise<boolean> {
+	const stored = await getDb().set(lobbyKeyFor(guildId), { ...record });
+	try {
+		await indexLobbyGuild(guildId);
+	} catch (error) {
+		// The lobby itself is stored; a stale index only means the deauthorize
+		// webhook cannot find this guild. Never fail the caller for it.
+		console.error("[lobby-store] could not index the guild:", error);
+	}
+	return stored;
 }
 
 /** Deletes the guild's lobby record. */

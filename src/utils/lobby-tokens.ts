@@ -46,6 +46,18 @@ export async function saveUserToken(userId: string, token: StoredUserToken): Pro
 }
 
 /**
+ * Removes a user's stored connection.
+ *
+ * Called when Discord reports `APPLICATION_DEAUTHORIZED`: every revocation is
+ * mechanically an unmerge and the user's OAuth2 tokens become invalid, so
+ * keeping them would only make the panel claim a connection that no longer
+ * works (`/api/diag?user=…` would keep saying `connected: true`).
+ */
+export async function deleteUserToken(userId: string): Promise<void> {
+	await getDb().delete(userId);
+}
+
+/**
  * Exchanges the stored refresh token for a new access token and persists it.
  * Returns null when refreshing is not possible (no refresh token / no client
  * credentials).
