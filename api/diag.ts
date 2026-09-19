@@ -14,6 +14,10 @@
  *   ?guild=<id>    also read that server's commands, lobby record and channel
  *                  menu (privacy classification included)
  *   ?channel=<id>  highlight one channel from that menu
+ *   ?user=<id>     report whether that user has a stored Discord connection and
+ *                  which scopes it granted (never the token itself) — the
+ *                  scope, not the code, is what decides whether channel
+ *                  linking can succeed
  */
 
 import {
@@ -29,7 +33,8 @@ import {
 } from "../src/utils/diagnostics.js";
 import type { DiagEnvVar, Probe } from "../src/utils/diagnostics.js";
 import { commandNames, loadModulesOf } from "../src/utils/command-modules.js";
-import { buildSocialSdkOAuthUrl } from "../src/utils/lobby-oauth.js";
+import { buildSocialSdkOAuthUrl, hasSocialLayerScope } from "../src/utils/lobby-oauth.js";
+import { getStoredUserToken } from "../src/utils/lobby-tokens.js";
 import { listGuildChannelsForMenu } from "../src/utils/lobby-channels.js";
 import type { ClassifiedChannel } from "../src/utils/lobby-channels.js";
 import { getLobbyRecord } from "../src/utils/lobby-store.js";
@@ -164,6 +169,21 @@ export default async function handler(req: DiagRequest, res: DiagResponse): Prom
 		? await probe(() => getLobbyRecord(guildId))
 		: ({ ok: false, error: "pass ?guild=<id> to inspect a server" } as Probe<LobbyRecord>);
 
+	// Read-only: deliberately `getStoredUserToken` rather than the refreshing
+	// helper, so a diagnostic can never rotate a user's tokens.
+	const userId = url.searchParams.get("user");
+	const userToken = userId
+		? await probe(async () => {
+				const stored = await getStoredUserToken(userId);
+				return {
+					connected: Boolean(stored),
+					scope: stored?.scope ?? null,
+					hasSocialLayer: hasSocialLayerScope(stored?.scope),
+					expired: stored?.expiresAt ? stored.expiresAt < Date.now() : null,
+				};
+			})
+		: undefined;
+
 	const problems = deriveProblems({
 		env,
 		modules: {
@@ -176,6 +196,7 @@ export default async function handler(req: DiagRequest, res: DiagResponse): Prom
 		bot,
 		guilds,
 		registered,
+		userToken: userToken?.ok ? userToken.data : undefined,
 	});
 
 	sendJson(res, 200, {
@@ -198,6 +219,8 @@ export default async function handler(req: DiagRequest, res: DiagResponse): Prom
 		guilds,
 		registered,
 		guildId,
+		userId,
+		userToken,
 		channels,
 		selectedChannel,
 		lobby,

@@ -25,26 +25,29 @@ import { getFreshUserToken } from "../utils/lobby-tokens.ts";
  * guild's channels with the BOT token and present a labelled StringSelect
  * instead (privacy badges computed from permission_overwrites). The
  * post-selection warning step (lc:pick) remains the safety net.
+ *
+ * The handler defers first: a lobby read plus two Discord calls do not reliably
+ * fit inside Discord's 3 second first-response deadline, and a late response
+ * makes the button appear to do nothing at all.
  */
 export const linkButton = {
 	customId: "lc:link",
 
 	handler: (async (interaction) => {
+		// Ephemerality is fixed here; the editReply below must not repeat it.
+		await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
 		const guildId = interaction.guild_id;
 		const userId = interaction.member?.user?.id ?? interaction.user?.id;
 
 		if (!guildId || !userId) {
-			return interaction.reply({
-				content: "❌ This only works inside a server.",
-				flags: MessageFlags.Ephemeral,
-			});
+			return interaction.editReply({ content: "❌ This only works inside a server." });
 		}
 
 		const record = await getLobbyRecord(guildId);
 		if (!record) {
-			return interaction.reply({
+			return interaction.editReply({
 				content: "❌ No lobby found for this server. Run `/linked-channel` first.",
-				flags: MessageFlags.Ephemeral,
 			});
 		}
 
@@ -52,18 +55,16 @@ export const linkButton = {
 		// stored token lacks sdk.social_layer (linking would 403 anyway).
 		const storedToken = await getFreshUserToken(userId);
 		if (!storedToken || !hasSocialLayerScope(storedToken.scope)) {
-			return interaction.reply({
+			return interaction.editReply({
 				content:
 					"⚠️ **Reconnect required** — channel linking needs a Discord connection with the `openid sdk.social_layer` scope. Use **Reconnect Discord** on the `/linked-channel` panel first.",
-				flags: MessageFlags.Ephemeral,
 			});
 		}
 
 		const botToken = process.env.DISCORD_BOT_TOKEN;
 		if (!botToken) {
-			return interaction.reply({
+			return interaction.editReply({
 				content: "❌ Missing DISCORD_BOT_TOKEN environment variable.",
-				flags: MessageFlags.Ephemeral,
 			});
 		}
 
@@ -72,16 +73,14 @@ export const linkButton = {
 			channels = await listGuildChannelsForMenu(guildId);
 		} catch (error) {
 			console.error("[lc:link] channel listing failed:", error);
-			return interaction.reply({
+			return interaction.editReply({
 				content: "❌ Could not list this server's channels. Please try again later.",
-				flags: MessageFlags.Ephemeral,
 			});
 		}
 
 		if (channels.length === 0) {
-			return interaction.reply({
+			return interaction.editReply({
 				content: "❌ No text channels available to link in this server.",
-				flags: MessageFlags.Ephemeral,
 			});
 		}
 
@@ -120,8 +119,10 @@ export const linkButton = {
 			),
 		);
 
-		return interaction.reply({
-			flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
+		// Components V2 must be flagged explicitly on an edit: the deferred-edit
+		// path does not infer the flag when re-sending the payload.
+		return interaction.editReply({
+			flags: MessageFlags.IsComponentsV2,
 			components: [container],
 		});
 	}) satisfies ComponentHandler,

@@ -41,6 +41,15 @@ export type DiagInput = {
 	guilds: Probe<{ id: string; name: string }[]>;
 	/** Commands currently registered for the application. */
 	registered: { global: Probe<string[]>; guild?: Probe<string[]> & { guildId: string } };
+	/**
+	 * Stored OAuth token state for a user, when one was asked for. Never carries
+	 * the token itself — only whether one exists and which scopes it granted.
+	 */
+	userToken?: {
+		connected: boolean;
+		scope: string | null;
+		hasSocialLayer: boolean;
+	};
 };
 
 /** True when a probe was rejected by Discord for a bad/expired token. */
@@ -130,6 +139,17 @@ export function deriveProblems(input: DiagInput): string[] {
 	}
 
 	// 6. Linked Channels extras.
+	if (input.userToken) {
+		if (!input.userToken.connected) {
+			problems.push(
+				"This user has no stored Discord connection — /linked-channel linking and invites need one (use the Connect Discord page first).",
+			);
+		} else if (!input.userToken.hasSocialLayer) {
+			problems.push(
+				`The stored connection's scopes are \`${input.userToken.scope ?? "unknown"}\` — linking/unlinking/invites all require \`openid sdk.social_layer\`, so every link attempt is refused before it reaches Discord. That scope is limited access: the application must be accepted into Discord's Social SDK program, then the user re-consents via **Reconnect Discord**.`,
+			);
+		}
+	}
 	if (input.registered.guild && isAuthFailure(input.registered.guild)) {
 		problems.push(
 			"Could not read this server's commands (401) — the bot token is invalid, so channel linking will fail too.",

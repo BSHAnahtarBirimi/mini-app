@@ -20,36 +20,33 @@ export const joinServerButton = {
 	customId: "lc:join",
 
 	handler: (async (interaction) => {
+		// Ephemerality is fixed here; the editReply below must not repeat it.
+		await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
 		const guildId = interaction.guild_id;
 		const userId = interaction.member?.user?.id ?? interaction.user?.id;
 		if (!guildId || !userId) {
-			return interaction.reply({
-				content: "❌ This only works inside a server.",
-				flags: MessageFlags.Ephemeral,
-			});
+			return interaction.editReply({ content: "❌ This only works inside a server." });
 		}
 
 		const record = await getLobbyRecord(guildId);
 		if (!record) {
-			return interaction.reply({
+			return interaction.editReply({
 				content: "❌ No lobby found for this server. Ask an admin to run `/linked-channel` first.",
-				flags: MessageFlags.Ephemeral,
 			});
 		}
 
 		const storedToken = await getFreshUserToken(userId);
 		if (!storedToken) {
-			return interaction.reply({
+			return interaction.editReply({
 				content:
 					"❌ Connect your Discord account first (the app's **Connect Discord** page), then try again.",
-				flags: MessageFlags.Ephemeral,
 			});
 		}
 		if (!hasSocialLayerScope(storedToken.scope)) {
-			return interaction.reply({
+			return interaction.editReply({
 				content:
 					"⚠️ **Reconnect required** — joining via the lobby needs the `openid sdk.social_layer` scope. Use **Reconnect Discord** on the `/linked-channel` panel, then try again.",
-				flags: MessageFlags.Ephemeral,
 			});
 		}
 
@@ -59,33 +56,30 @@ export const joinServerButton = {
 				storedToken.accessToken,
 			);
 
-			return interaction.reply({
+			return interaction.editReply({
 				content: [
 					"📨 **Your one-time invite is ready!** It expires after 1 hour and can only be used once.",
 					`https://discord.gg/${invite.code}`,
 				].join("\n"),
-				flags: MessageFlags.Ephemeral,
 			});
 		} catch (error) {
 			if (error instanceof DiscordRestApiError) {
 				console.error("[lc:join] invite failed:", error.status, error.body);
-				return interaction.reply({
+				return interaction.editReply({
 					content: [
 						"❌ **Could not create an invite.**",
 						`• ${describeLobbyError(error)}`,
 						"",
 						"The lobby must have a linked channel and you must be one of its members.",
 					].join("\n"),
-					flags: MessageFlags.Ephemeral,
 				});
 			}
 			console.error("[lc:join] unexpected error:", error);
-			return interaction.reply({
+			return interaction.editReply({
 				content: [
 					"❌ **Unexpected error while creating the invite.**",
 					`• ${error instanceof Error ? error.message : String(error)}`,
 				].join("\n"),
-				flags: MessageFlags.Ephemeral,
 			});
 		}
 	}) satisfies ComponentHandler,

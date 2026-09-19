@@ -22,29 +22,26 @@ export const pickChannelSelect = {
 	customId: "lc:pick",
 
 	handler: (async (interaction) => {
+		// The pick is persisted before the warning is rendered; deferring first
+		// keeps that write from eating Discord's 3 second response deadline.
+		await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
 		const guildId = interaction.guild_id;
 		const userId = interaction.member?.user?.id ?? interaction.user?.id;
 		if (!guildId || !userId) {
-			return interaction.reply({
-				content: "❌ This only works inside a server.",
-				flags: MessageFlags.Ephemeral,
-			});
+			return interaction.editReply({ content: "❌ This only works inside a server." });
 		}
 
 		const record = await getLobbyRecord(guildId);
 		if (!record) {
-			return interaction.reply({
+			return interaction.editReply({
 				content: "❌ No lobby found for this server. Run `/linked-channel` first.",
-				flags: MessageFlags.Ephemeral,
 			});
 		}
 
 		const channelId = interaction.values?.[0];
 		if (!channelId) {
-			return interaction.reply({
-				content: "❌ No channel selected.",
-				flags: MessageFlags.Ephemeral,
-			});
+			return interaction.editReply({ content: "❌ No channel selected." });
 		}
 
 		// The resolved channel object carries the guild id again.
@@ -79,7 +76,7 @@ export const pickChannelSelect = {
 
 		const mention = channelName ? `**#${channelName}**` : `<#${channelId}>`;
 
-		return interaction.reply({
+		return interaction.editReply({
 			content: [
 				"## ⚠️ Warning: Link this channel?",
 				`You are about to link ${mention} to this lobby.`,
@@ -116,7 +113,6 @@ export const pickChannelSelect = {
 					],
 				},
 			],
-			flags: MessageFlags.Ephemeral,
 		});
 	}) satisfies ComponentHandler,
 };

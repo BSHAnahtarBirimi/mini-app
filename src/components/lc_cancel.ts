@@ -8,15 +8,17 @@ export const cancelLinkButton = {
 	customId: "lc:cancel",
 
 	handler: (async (interaction) => {
+		// Ephemerality is fixed here; the editReply below must not repeat it.
+		await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
 		const guildId = interaction.guild_id;
 		const userId = interaction.member?.user?.id ?? interaction.user?.id;
 		if (guildId && userId) {
 			await clearPendingLink(userId, guildId);
 		}
 
-		return interaction.reply({
+		return interaction.editReply({
 			content: "🚫 Cancelled — nothing was linked.",
-			flags: MessageFlags.Ephemeral,
 		});
 	}) satisfies ComponentHandler,
 };

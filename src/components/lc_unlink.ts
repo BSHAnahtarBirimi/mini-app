@@ -17,36 +17,33 @@ export const unlinkButton = {
 	customId: "lc:unlink",
 
 	handler: (async (interaction) => {
+		// Ephemerality is fixed here; the editReply below must not repeat it.
+		await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
 		const guildId = interaction.guild_id;
 		const userId = interaction.member?.user?.id ?? interaction.user?.id;
 		if (!guildId || !userId) {
-			return interaction.reply({
-				content: "❌ This only works inside a server.",
-				flags: MessageFlags.Ephemeral,
-			});
+			return interaction.editReply({ content: "❌ This only works inside a server." });
 		}
 
 		const record = await getLobbyRecord(guildId);
 		if (!record) {
-			return interaction.reply({
+			return interaction.editReply({
 				content: "ℹ️ No lobby is configured for this server yet.",
-				flags: MessageFlags.Ephemeral,
 			});
 		}
 
 		const storedToken = await getFreshUserToken(userId);
 		if (!storedToken) {
-			return interaction.reply({
+			return interaction.editReply({
 				content:
 					"❌ Connect your Discord account first (the app's **Connect Discord** page), then retry.",
-				flags: MessageFlags.Ephemeral,
 			});
 		}
 		if (!hasSocialLayerScope(storedToken.scope)) {
-			return interaction.reply({
+			return interaction.editReply({
 				content:
 					"⚠️ **Reconnect required** — your Discord connection is missing the `openid sdk.social_layer` scope. Use **Reconnect Discord** on the `/linked-channel` panel, then retry.",
-				flags: MessageFlags.Ephemeral,
 			});
 		}
 
@@ -54,30 +51,27 @@ export const unlinkButton = {
 			await unlinkChannelFromLobby(record.lobbyId, storedToken.accessToken);
 			await deleteLobbyRecord(guildId);
 
-			return interaction.reply({
+			return interaction.editReply({
 				content: "✅ **Unlinked.** The lobby no longer forwards messages to any Discord channel.",
-				flags: MessageFlags.Ephemeral,
 			});
 		} catch (error) {
 			if (error instanceof DiscordRestApiError) {
 				console.error("[lc:unlink] unlink failed:", error.status, error.body);
-				return interaction.reply({
+				return interaction.editReply({
 					content: [
 						"❌ **Discord rejected the unlink.**",
 						`• ${describeLobbyError(error)}`,
 						"",
 						"Common causes: missing `sdk.social_layer` scope, missing CanLinkLobby lobby flag, no link present, or the development cap of **20 calls per 2 hours** being exhausted. The request was **not** retried.",
 					].join("\n"),
-					flags: MessageFlags.Ephemeral,
 				});
 			}
 			console.error("[lc:unlink] unexpected error:", error);
-			return interaction.reply({
+			return interaction.editReply({
 				content: [
 					"❌ **Unexpected error while unlinking.** The request was **not** retried.",
 					`• ${error instanceof Error ? error.message : String(error)}`,
 				].join("\n"),
-				flags: MessageFlags.Ephemeral,
 			});
 		}
 	}) satisfies ComponentHandler,

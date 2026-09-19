@@ -96,6 +96,32 @@ test("a missing application id is not reported twice", () => {
 	assert.doesNotMatch(problems, /Could not read the registered global commands/);
 });
 
+test("a connection missing sdk.social_layer is reported as the linking blocker", () => {
+	const input: DiagInput = {
+		...healthy(),
+		userToken: { connected: true, scope: "applications.commands identify", hasSocialLayer: false },
+	};
+	const problems = joined(input);
+	assert.match(problems, /openid sdk\.social_layer/);
+	assert.match(problems, /limited access/);
+});
+
+test("a user with no stored connection is reported", () => {
+	const input: DiagInput = {
+		...healthy(),
+		userToken: { connected: false, scope: null, hasSocialLayer: false },
+	};
+	assert.match(joined(input), /no stored Discord connection/);
+});
+
+test("a connection that already has the Social SDK scope adds no problem", () => {
+	const input: DiagInput = {
+		...healthy(),
+		userToken: { connected: true, scope: "openid sdk.social_layer", hasSocialLayer: true },
+	};
+	assert.deepEqual(deriveProblems(input), []);
+});
+
 test("invite URL installs the bot with the commands scope", () => {
 	const url = buildBotInviteUrl("1530890351101874277");
 	assert.match(url, /scope=bot\+applications\.commands/);
