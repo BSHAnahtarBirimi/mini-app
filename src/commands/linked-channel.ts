@@ -46,22 +46,36 @@ export const linkedChannelCommand = {
 		.setDescription("Manage the Discord channel linked to this server's lobby"),
 
 	handler: (async (interaction) => {
+		/*
+		 * Acknowledge before doing any work.
+		 *
+		 * Discord invalidates the interaction token unless the FIRST response
+		 * arrives within 3 seconds, and this handler cannot answer before it
+		 * has done several sequential round-trips: read the lobby (Mongo),
+		 * maybe create it (Discord REST), store it (Mongo), then read the
+		 * caller's stored token (Mongo) — plus a token refresh when it has
+		 * expired. Missing that deadline makes the client report "The
+		 * application did not respond" while the lobby has already been
+		 * created, so the panel never shows. Deferring costs one fast call and
+		 * buys the full function timeout for the rest.
+		 *
+		 * Ephemerality has to be set here: the later `editReply` edits the
+		 * deferred message and must NOT pass `MessageFlags.Ephemeral`.
+		 */
+		await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
 		const guildId = interaction.guild_id;
 		const userId = interaction.member?.user?.id ?? interaction.user?.id;
 		if (!guildId || !userId) {
-			return interaction.reply({
+			return interaction.editReply({
 				content: "❌ This command only works inside a server.",
-				flags: MessageFlags.Ephemeral,
 			});
 		}
 
 		// Lobby links and user tokens live in MiniDatabase; without it every
 		// later step would silently look "unlinked".
 		if (!hasDatabaseConfig()) {
-			return interaction.reply({
-				content: DATABASE_NOT_CONFIGURED_MESSAGE,
-				flags: MessageFlags.Ephemeral,
-			});
+			return interaction.editReply({ content: DATABASE_NOT_CONFIGURED_MESSAGE });
 		}
 
 		// Auto-provision: create the lobby once per guild with the invoking
@@ -72,9 +86,8 @@ export const linkedChannelCommand = {
 			const applicationId = process.env.DISCORD_APPLICATION_ID;
 			const botToken = process.env.DISCORD_BOT_TOKEN;
 			if (!applicationId || !botToken) {
-				return interaction.reply({
+				return interaction.editReply({
 					content: "❌ Missing DISCORD_APPLICATION_ID / DISCORD_BOT_TOKEN environment variables.",
-					flags: MessageFlags.Ephemeral,
 				});
 			}
 			try {
@@ -89,7 +102,7 @@ export const linkedChannelCommand = {
 				await setLobbyRecord(guildId, record);
 			} catch (error) {
 				console.error("[linked-channel] lobby creation failed:", error);
-				return interaction.reply({
+				return interaction.editReply({
 					content: [
 						"❌ **Could not create the lobby.**",
 						error instanceof DiscordRestApiError ? `• ${describeLobbyError(error)}` : "",
@@ -97,7 +110,6 @@ export const linkedChannelCommand = {
 					]
 						.filter(Boolean)
 						.join("\n"),
-					flags: MessageFlags.Ephemeral,
 				});
 			}
 		}
@@ -161,7 +173,7 @@ export const linkedChannelCommand = {
 							.setLabel("🔁 Reconnect Discord")
 							.setURL(reconnectUrl),
 					),
-				);
+			);
 			container.addComponent(
 				new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true),
 			);
@@ -214,8 +226,10 @@ export const linkedChannelCommand = {
 			),
 		);
 
-		return interaction.reply({
-			flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
+		// Ephemerality was fixed by the deferral above; only the Components V2
+		// flag belongs here.
+		return interaction.editReply({
+			flags: MessageFlags.IsComponentsV2,
 			components: [container],
 		});
 	}) satisfies SlashCommandHandler,

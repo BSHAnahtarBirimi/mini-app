@@ -130,6 +130,15 @@ the real extension — `import { getDb } from "../utils/database.ts"` — never
 the deployment, and one unresolvable import rejects the whole module load, so
 **every** command and button stops responding while local tooling (tsx) keeps
 working. `src/utils/module-specifiers.test.ts` enforces this for `src/`.
+>
+> A handler that touches the database or Discord **before answering** must call
+> `interaction.deferReply({ flags: MessageFlags.Ephemeral })` (or `deferUpdate()`
+> for a component) as its first statement, then fill the message in with
+> `editReply()`. Discord discards a first response that takes longer than 3
+> seconds, so a slow handler looks like a command that does nothing while its
+> side effects still happen. The Ephemeral flag belongs on the deferral only —
+> Discord rejects it on an edit. `src/utils/response-timing.test.ts` enforces
+> this for the Linked Channels handlers.
 
 ## Handler API reference
 
