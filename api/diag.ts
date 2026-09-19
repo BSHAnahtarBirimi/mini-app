@@ -40,6 +40,7 @@ import type { ClassifiedChannel } from "../src/utils/lobby-channels.js";
 import { getLobbyRecord } from "../src/utils/lobby-store.js";
 import type { LobbyRecord } from "../src/utils/lobby-store.js";
 import { describeLobbyError } from "../src/utils/lobby-api.js";
+import { getInteractionErrors } from "../src/utils/interaction-errors.js";
 
 /** Minimal structural subset of the Vercel node request/response we use. */
 type DiagRequest = { method?: string; url?: string };
@@ -184,6 +185,11 @@ export default async function handler(req: DiagRequest, res: DiagResponse): Prom
 			})
 		: undefined;
 
+	// Read-only view of the failures the dispatch hook recorded. This is the
+	// only place a "«bot» is thinking…" cause becomes visible without dashboard
+	// access — the framework logs those to console.error and nowhere else.
+	const recentFailures = await getInteractionErrors();
+
 	const problems = deriveProblems({
 		env,
 		modules: {
@@ -192,6 +198,7 @@ export default async function handler(req: DiagRequest, res: DiagResponse): Prom
 			modals: modules.modals,
 			error: modules.error,
 		},
+		recentFailures,
 		expectedCommands: modules.expectedCommands,
 		bot,
 		guilds,
@@ -221,6 +228,7 @@ export default async function handler(req: DiagRequest, res: DiagResponse): Prom
 		guildId,
 		userId,
 		userToken,
+		recentFailures,
 		channels,
 		selectedChannel,
 		lobby,

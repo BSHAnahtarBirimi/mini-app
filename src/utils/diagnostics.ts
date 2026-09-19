@@ -50,6 +50,13 @@ export type DiagInput = {
 		scope: string | null;
 		hasSocialLayer: boolean;
 	};
+	/**
+	 * The newest interaction-handler failures the dispatch hook recorded, newest
+	 * first. These are the errors that stay invisible otherwise: a handler that
+	 * acknowledged and then threw leaves the client on "«bot» is thinking…" and
+	 * only reaches `console.error`, which needs dashboard access to read.
+	 */
+	recentFailures?: { at: string; context: string; message: string }[];
 };
 
 /** True when a probe was rejected by Discord for a bad/expired token. */
@@ -83,7 +90,19 @@ export function deriveProblems(input: DiagInput): string[] {
 		problems.push("No command modules were found in src/commands.");
 	}
 
-	// 3. Bot token validity — bot-authenticated calls (channel list, lobbies,
+	// 3. A handler that acknowledged Discord and then threw never completes the
+	//    message, so the user is stuck on "«bot» is thinking…". Nothing else in
+	//    the deployment can explain that from the outside, so report the last
+	//    recorded failure with its context.
+	const failures = input.recentFailures ?? [];
+	if (failures.length > 0) {
+		const latest = failures[0];
+		problems.push(
+			`The last interaction handler to fail was \`${latest.context}\` (${latest.at}): ${latest.message} — a handler that fails after acknowledging leaves the client on "«bot» is thinking…".`,
+		);
+	}
+
+	// 4. Bot token validity — bot-authenticated calls (channel list, lobbies,
 	//    command registration) all fail together when the token is stale.
 	if (isAuthFailure(input.bot)) {
 		problems.push(
@@ -95,7 +114,7 @@ export function deriveProblems(input: DiagInput): string[] {
 		problems.push("DISCORD_APPLICATION_ID is missing but the bot token works.");
 	}
 
-	// 4. Commands only appear in a server when the bot is installed there with
+	// 5. Commands only appear in a server when the bot is installed there with
 	//    the `applications.commands` scope.
 	const guilds = input.guilds.ok ? (input.guilds.data ?? []) : undefined;
 	if (guilds && guilds.length === 0) {
@@ -106,7 +125,7 @@ export function deriveProblems(input: DiagInput): string[] {
 		problems.push(`Could not list the bot's servers: ${input.guilds.error ?? "unknown error"}.`);
 	}
 
-	// 5. Registration state: this is the usual reason commands are invisible.
+	// 6. Registration state: this is the usual reason commands are invisible.
 	const globalNames = input.registered.global.ok ? (input.registered.global.data ?? []) : [];
 	const guildNames = input.registered.guild?.ok ? (input.registered.guild.data ?? []) : [];
 	const registeredNames = new Set([...globalNames, ...guildNames]);
@@ -138,7 +157,7 @@ export function deriveProblems(input: DiagInput): string[] {
 		}
 	}
 
-	// 6. Linked Channels extras.
+	// 7. Linked Channels extras.
 	if (input.userToken) {
 		if (!input.userToken.connected) {
 			problems.push(

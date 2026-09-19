@@ -139,6 +139,17 @@ working. `src/utils/module-specifiers.test.ts` enforces this for `src/`.
 > side effects still happen. The Ephemeral flag belongs on the deferral only —
 > Discord rejects it on an edit. `src/utils/response-timing.test.ts` enforces
 > this for the Linked Channels handlers.
+>
+> Build a deferral's payload **before** the first response is sent, and never
+> let a builder throw after it. `SectionBuilder.toJSON()` rejects a section with
+> no accessory (`[SectionBuilder] accessory is required for sections`) — a
+> payload that throws while being constructed kills the handler *after* the
+> acknowledgement, so the user sees "«bot» is thinking…" indefinitely and the
+> only trace is a `console.error` in the Vercel dashboard. That is how
+> `/linked-channel` broke, so `src/utils/linked-channel-panel.ts` builds the V2
+> and legacy forms of each message in one tested place
+> (`src/utils/linked-channel-panel.test.ts` constructs every payload), and
+> `api/interactions.ts` records handler failures for `/api/diag`.
 
 ## Handler API reference
 
@@ -223,6 +234,7 @@ names Discord already shows to everyone):
 | `guilds` | Which servers the bot is actually in |
 | `registered.global` / `registered.guild` | Which commands Discord currently has |
 | `channels`, `selectedChannel`, `lobby` | The Linked Channels channel menu with privacy verdicts, and the stored lobby |
+| `recentFailures` | The last handler failures, which is why a message stayed on "«bot» is thinking…" |
 | `links.botInvite` | Invite URL with `scope=bot+applications.commands` |
 
 ```bash
