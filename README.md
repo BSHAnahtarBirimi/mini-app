@@ -184,6 +184,18 @@ Lobby API (see `docs.discord.com/developers/resources/lobby`):
   inviting against a lobby that no longer exists says so instead of reporting a
   Discord failure. `GET /api/diag?guild=…` reports `lobbyState` so you can see
   whether the stored lobby is still alive.
+- **Every Lobby call uses a fresh `DiscordRestClient` and a 5 s bound.**
+  `DiscordRestClient` remembers rate-limit buckets on the instance, and
+  `waitForBucket()` sleeps until a bucket resets *before* the next call is even
+  attempted. The channel-linking bucket is the application-wide cap (20 calls /
+  2 h while the app is unapproved), so a single `404 Unknown Lobby` on a shared
+  client makes the *next* link call sleep for up to two hours — in a serverless
+  function the invocation is killed at `maxDuration` first, leaving the admin on
+  "«bot» is thinking…" with nothing linked and nothing recorded. A client that
+  carries no learned state cannot do that, and `withTimeout()` converts any
+  remaining stall into a reported `LobbyCallTimeoutError` instead of a silent
+  hang. `src/utils/lobby-api.test.ts` reproduces the trap with the library's own
+  client and pins both halves of the fix.
 - **Link a channel** fetches the guild's text channels with the bot token and
   shows a labelled `StringSelect` (Discord channel select menus have no
   per-option labels, so privacy badges are computed from
@@ -207,7 +219,8 @@ silently: `MONGODB_URI` missing (nothing can be persisted), a stored token
 without `sdk.social_layer` (press **Reconnect Discord**), a lobby whose member
 lacks `CanLinkLobby`, missing Manage Channels / View Channel / Send Messages on
 the chosen channel, an expired lobby (re-created automatically on the next
-link), or the 20-calls-per-2-hours development cap. User tokens
+link), the 20-calls-per-2-hours development cap, or a call Discord did not
+answer within 5 s (reported as ⏳ and recorded, never retried). User tokens
 expire after ~7 days and are refreshed automatically from the stored refresh
 token. The picked channel is persisted in `MiniDatabase`
 (`lc-pending:${userId}:${guildId}`, 10 minute TTL) because consecutive
@@ -220,8 +233,10 @@ Run the pure-logic tests with `npm test`.
 Built on `@minesa-org/mini-interaction` **v0.14.0**, which ships the full Lobby
 surface (`LobbyMemberFlags`, `linkChannelToLobby`, `unlinkChannelFromLobby`,
 `createLobbyChannelInviteForSelf`, `OAuth2Builder`). `src/utils/lobby-api.ts`
-wraps the package's `DiscordRestClient` with `maxRetries: 0` so a rate-limited
-link fails fast instead of retrying.
+drives the package's `DiscordRestClient` with `maxRetries: 0`, **one client per
+call** (no learned rate-limit state can be carried into the next attempt) and a
+5 s bound per call, so a rate-limited or stalled link is reported to the admin
+instead of retried or slept out.
 
 v0.14.0 exists only as a GitHub tag — npm still serves 0.9.0 — and it cannot be
 installed from there on Vercel: the build image's npm 12 refuses git

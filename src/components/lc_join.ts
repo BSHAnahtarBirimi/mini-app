@@ -4,8 +4,14 @@ import type { ComponentHandler } from "@minesa-org/mini-interaction";
 import { getLobbyRecord } from "../utils/lobby-store.ts";
 import { getFreshUserToken } from "../utils/lobby-tokens.ts";
 import { hasSocialLayerScope } from "../utils/lobby-oauth.ts";
-import { createLobbyChannelInviteForSelf, describeLobbyError, DiscordRestApiError } from "../utils/lobby-api.ts";
+import {
+	createLobbyChannelInviteForSelf,
+	describeLobbyError,
+	DiscordRestApiError,
+	LobbyCallTimeoutError,
+} from "../utils/lobby-api.ts";
 import { isUnknownLobbyError } from "../utils/lobby-lifecycle.ts";
+import { recordInteractionError } from "../utils/interaction-errors.ts";
 
 /**
  * `lc:join` — "Join Discord server" button.
@@ -71,6 +77,17 @@ export const joinServerButton = {
 				return interaction.editReply({
 					content: [
 						"⌛ **This lobby no longer exists on Discord's side.** Lobbies are re-created when a channel is linked, so run `/linked-channel` and link a channel again.",
+					].join("\n"),
+				});
+			}
+			if (error instanceof LobbyCallTimeoutError) {
+				console.error("[lc:join] invite call timed out:", error.message);
+				await recordInteractionError(error, "lc:join:timeout");
+				return interaction.editReply({
+					content: [
+						"⏳ **Discord did not answer the invite request.**",
+						`• ${error.message}`,
+						"No invite was created, and the request was **not** retried.",
 					].join("\n"),
 				});
 			}

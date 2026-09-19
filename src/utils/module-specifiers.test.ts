@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 /**
  * Regression guard for a failure that only shows up in production.
@@ -43,6 +44,67 @@ test("runtime-loaded modules import their siblings with explicit .ts extensions"
 		offenders,
 		[],
 		`these relative imports must use the .ts extension, otherwise the deployed loader cannot resolve them:\n${offenders.join("\n")}`,
+	);
+});
+
+/**
+ * Regression guard for the second half of the same rule.
+ *
+ * Node loads these modules **itself**, and its TypeScript support is
+ * *strip-only*: syntax that needs transforming — parameter properties
+ * (`constructor(readonly x: string)`), `enum`, `namespace`, `declare` fields —
+ * is rejected with `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`. `tsx` accepts it, so
+ * the failure exists only in the deployment, and because every handler is
+ * imported in one `Promise.all`, one such line breaks all of them at once (it
+ * broke `/api/diag` and would have broken every Linked Channels handler).
+ *
+ * Importing each module under plain Node is the only check that catches this
+ * before a deploy, so the test does exactly that, in one child process. It is
+ * skipped on a Node that cannot import TypeScript at all (strip-only types
+ * arrived in 22.6), because there the import fails for an unrelated reason and
+ * says nothing about the syntax.
+ */
+test("runtime-loaded modules use only TypeScript that Node can strip", async (t) => {
+	const sourceRoot = fileURLToPath(new URL("../", import.meta.url));
+	const self = path.basename(fileURLToPath(import.meta.url));
+
+	const files = (await walk(sourceRoot))
+		.filter((file) => file.endsWith(".ts") && !file.endsWith(".d.ts"))
+		.filter((file) => !file.endsWith(".test.ts") && path.basename(file) !== self);
+	assert.ok(files.length > 10, `expected to scan the src tree, found ${files.length} files`);
+
+	const script = [
+		`const files = ${JSON.stringify(files.map((file) => pathToFileURL(file).href))};`,
+		"const failures = [];",
+		"for (const file of files) {",
+		"\ttry {",
+		"\t\tawait import(file);",
+		"\t} catch (error) {",
+		"\t\tfailures.push({ file, code: error?.code ?? null, message: error?.message ?? String(error) });",
+		"\t}",
+		"}",
+		"console.log(JSON.stringify(failures));",
+	].join("\n");
+
+	const output = execFileSync(process.execPath, ["--input-type=module", "-e", script], {
+		encoding: "utf8",
+		maxBuffer: 4 * 1024 * 1024,
+	});
+	const failures = JSON.parse(output) as { file: string; code: string | null; message: string }[];
+
+	// Older runtimes reject the extension itself, so this cannot judge anything.
+	if (failures.length > 0 && failures.every(({ code }) => code === "ERR_UNKNOWN_FILE_EXTENSION")) {
+		t.skip(
+			`Node ${process.versions.node} cannot import TypeScript (strip-only types start in 22.6); ` +
+				"the deployment runs Node 24, where this check applies",
+		);
+		return;
+	}
+
+	assert.deepEqual(
+		failures.map(({ file, code, message }) => `${path.relative(sourceRoot, fileURLToPath(file))}: ${code ?? ""} ${message}`),
+		[],
+		"every runtime-loaded module must be importable by plain Node (strip-only TypeScript)",
 	);
 });
 
