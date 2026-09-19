@@ -3,10 +3,12 @@ import test from "node:test";
 
 import { MessageFlags } from "@minesa-org/mini-interaction";
 
-import { createAuthorizeHandler, resolveAuthorizeReply } from "./authorize.ts";
-import type { AuthorizeDeps } from "./authorize.ts";
-import type { StoredUserToken } from "../utils/lobby-tokens.ts";
-import type { UserTokenCheck } from "../utils/user-identity.ts";
+
+import { authorizeCommand } from "../commands/authorize.ts";
+import { createAuthorizeHandler, resolveAuthorizeReply } from "./authorize-command.ts";
+import type { AuthorizeDeps } from "./authorize-command.ts";
+import type { StoredUserToken } from "./lobby-tokens.ts";
+import type { UserTokenCheck } from "./user-identity.ts";
 
 /**
  * `/authorize` is the recovery path when a connection is missing, incomplete or
@@ -291,6 +293,16 @@ test("a failure is reported instead of leaving the interaction unanswered", asyn
 	const { replies } = await run({ userId: "1", getThrows: true });
 	assert.match(allText(replies[0]!), /Could not build the authorize link/);
 	assert.match(allText(replies[0]!), /database is unreachable/);
+});
+
+test("the command module stays a wrapper around the tested handler", () => {
+	// The command itself is discovered by name, so the wrapper is the one thing
+	// here that the framework reads: a rename or a description change is a
+	// user-visible change.
+	const payload = authorizeCommand.data.toJSON();
+	assert.equal(payload.name, "authorize");
+	assert.match(String(payload.description), /Authorize/i);
+	assert.equal(typeof authorizeCommand.handler, "function");
 });
 
 test("the reply can be resolved without a Discord interaction", async () => {

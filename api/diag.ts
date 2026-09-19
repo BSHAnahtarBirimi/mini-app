@@ -45,7 +45,11 @@ import {
 	deriveProblems,
 } from "../src/utils/diagnostics.js";
 import type { DiagEnvVar, Probe } from "../src/utils/diagnostics.js";
-import { commandNames, loadModulesOf } from "../src/utils/command-modules.js";
+import {
+	commandNames,
+	loadModulesOf,
+	registrationProblems,
+} from "../src/utils/command-modules.js";
 import { buildSocialSdkOAuthUrl, hasSocialLayerScope } from "../src/utils/lobby-oauth.js";
 import { getStoredUserToken } from "../src/utils/lobby-tokens.js";
 import { listGuildChannelsForMenu } from "../src/utils/lobby-channels.js";
@@ -61,7 +65,11 @@ import {
 	buildPanelPayloads,
 } from "../src/utils/linked-channel-panel.js";
 import { buildAuthorizePayloads } from "../src/utils/authorize-panel.js";
-import { createAuthorizeHandler } from "../src/commands/authorize.js";
+// Deliberately *not* from `src/commands/`: a command module is imported by the
+// framework's runtime scan, and importing one from here would make the bundler
+// emit a compiled copy beside it, so the scan would find the command twice (see
+// `src/utils/authorize-command.ts`).
+import { createAuthorizeHandler } from "../src/utils/authorize-command.js";
 
 /** Minimal structural subset of the Vercel node request/response we use. */
 type DiagRequest = {
@@ -294,8 +302,16 @@ async function loadHandlerModules(): Promise<{
 	modals: number;
 	error: string | null;
 	expectedCommands: string[];
+	payloadProblems: string[];
 }> {
-	const empty = { commands: 0, components: 0, modals: 0, error: null, expectedCommands: [] as string[] };
+	const empty = {
+		commands: 0,
+		components: 0,
+		modals: 0,
+		error: null,
+		expectedCommands: [] as string[],
+		payloadProblems: [] as string[],
+	};
 	try {
 		const mini = new MiniInteraction({
 			commandsDirectory: "src/commands",
@@ -308,6 +324,10 @@ async function loadHandlerModules(): Promise<{
 			modals: modules.modals.length,
 			error: null,
 			expectedCommands: commandNames(modules),
+			// What the deploy's registration step would have refused to send: a
+			// payload Discord rejects leaves the command list unchanged, and the
+			// only other trace of it is the build log.
+			payloadProblems: registrationProblems(modules),
 		};
 	} catch (error) {
 		return { ...empty, error: error instanceof Error ? error.message : String(error) };
@@ -440,6 +460,7 @@ export default async function handler(req: DiagRequest, res: DiagResponse): Prom
 			: undefined;
 
 	const problems = deriveProblems({
+		...(modules.payloadProblems.length > 0 ? { commandPayloadProblems: modules.payloadProblems } : {}),
 		...(authorizeCommand
 			? {
 					authorizeCommand: {
@@ -484,6 +505,7 @@ export default async function handler(req: DiagRequest, res: DiagResponse): Prom
 			modals: modules.modals,
 			loadError: modules.error,
 			expectedCommands: modules.expectedCommands,
+			payloadProblems: modules.payloadProblems,
 		},
 		bot,
 		guilds,

@@ -145,6 +145,24 @@ working. `src/utils/module-specifiers.test.ts` enforces this for `src/`.
 > Discord rejects it on an edit. `src/utils/response-timing.test.ts` enforces
 > this for the Linked Channels handlers.
 >
+> `src/commands`, `src/components` and `src/modals` are **executed directories**,
+> not folders. Handler discovery imports *every* importable file in them — at
+> deploy time and on every cold start — so a `*.test.ts` placed there has its
+> tests run inside the deployment, and a file that is not a command lands in the
+> registration payload as `undefined`, which makes Discord reject the whole
+> `PUT` (leaving the old command list in place, with nothing but a build-log
+> line to say so). Keep tests and helpers out of those three directories;
+> `src/utils/discovered-directories.test.ts` enforces it and
+> `registrationProblems()` refuses to send a payload with a missing or
+> duplicated command (`npm run register` exits non-zero, the deploy logs it and
+> still succeeds).
+>
+> Equally: never import a **command module** from outside that scan (for
+> example from `api/`). The bundler then emits a compiled copy beside the source,
+> the directory scan finds the command twice, and the registration payload has a
+> duplicate name. That is why `/authorize`'s behaviour lives in
+> `src/utils/authorize-command.ts` and `src/commands/authorize.ts` only wraps it.
+>
 > Build a deferral's payload **before** the first response is sent, and never
 > let a builder throw after it. `SectionBuilder.toJSON()` rejects a section with
 > no accessory (`[SectionBuilder] accessory is required for sections`) — a
@@ -380,7 +398,7 @@ names Discord already shows to everyone):
 | Field | Answers |
 | --- | --- |
 | `problems` | Why commands are missing / linking cannot work, in order |
-| `modules` | Whether handler discovery works in the deployment, and its error otherwise |
+| `modules` | Whether handler discovery works in the deployment, and its error otherwise; `payloadProblems` lists why the discovered commands must not be registered |
 | `bot` | Whether `DISCORD_BOT_TOKEN` is still accepted by Discord |
 | `guilds` | Which servers the bot is actually in |
 | `registered.global` / `registered.guild` | Which commands Discord currently has |
