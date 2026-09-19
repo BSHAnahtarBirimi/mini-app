@@ -64,6 +64,14 @@ export type DiagInput = {
 	 */
 	payloads?: { ok: boolean; errors: string[] };
 	/**
+	 * Result of running the real `/authorize` handler against a stubbed
+	 * interaction (`?command=authorize`). The payload probe above proves the
+	 * messages can be built; this proves the command actually builds one — the
+	 * deferral, the stored-token read, the Discord token check and the reply —
+	 * without anyone having to press a button in Discord.
+	 */
+	authorizeCommand?: { ok: boolean; deferred: boolean; replies: number; error: string | null };
+	/**
 	 * Whether the stored lobby still exists on Discord's side (bot-token read).
 	 * Lobbies are session objects that Discord reaps when idle, so a stored id
 	 * is not durable — `404 Unknown Lobby` on the next link is exactly this.
@@ -133,6 +141,16 @@ export function deriveProblems(input: DiagInput): string[] {
 	if (input.payloads && !input.payloads.ok) {
 		problems.push(
 			`The Linked Channels messages cannot be built: ${input.payloads.errors.join("; ")} — the handler dies after acknowledging, leaving "«bot» is thinking…".`,
+		);
+	}
+
+	// 4b. The `/authorize` command itself (`?command=authorize`). Its payloads
+	//     being buildable is not the same as the command producing one, and this
+	//     is the recovery path for a broken connection — so it is exercised by
+	//     the endpoint rather than discovered broken by the person who needs it.
+	if (input.authorizeCommand && !input.authorizeCommand.ok) {
+		problems.push(
+			`/authorize could not produce a reply: ${input.authorizeCommand.error ?? "no payload and no error"} — pressing it would leave "«bot» is thinking…".`,
 		);
 	}
 

@@ -221,6 +221,15 @@ Lobby API (see `docs.discord.com/developers/resources/lobby`):
   **Authorize / Re-authorize Discord** link button (`openid sdk.social_layer`,
   `prompt=consent`). It is the same URL as the panel's **🔁 Reconnect Discord**
   button, and it is the recovery path whenever linking reports a scope problem.
+- **`/authorize` does not trust the stored record** — it asks Discord. A
+  connection whose token is dead looks perfectly fine in storage, so the command
+  verifies it with `GET /oauth2/@me` (`src/utils/user-identity.ts`,
+  `OAuth2Builder.getAuthorizationInfo`, which needs no `identify` scope): a
+  `401` means the record is **cleared** and the message says the connection was
+  revoked, a `200` replaces the stored scopes with the ones Discord reports were
+  actually granted, and an unanswered check (403/429/5xx/timeout) keeps the
+  record and says it could not be confirmed — a hiccup must not cost anyone a
+  working connection.
 - **A revoked connection is detected.** If Discord answers a user-token call
   with `401`, the stored record is dropped and the reply says to run
   `/authorize` — otherwise the app keeps reporting `connected: true` for a token
@@ -255,6 +264,7 @@ and the test message:
 | --- | --- | --- |
 | Panel, channel pick, warning step, link/unlink | `/linked-channel` in your server | The panel and its ephemeral answers |
 | Grant / restore your connection | **`/authorize`** (or **🔁 Reconnect Discord** on the panel) | The consent page, then `userToken.hasSocialLayer: true` in `/api/diag?user=…` |
+| The command itself, without typing anything | `GET /api/diag?command=authorize&user=<id>` | The reply `/authorize` would send — the link, and whether that connection is confirmed, incomplete or revoked |
 | A message going *through* the lobby | **✉️ Send a test message** on the panel (`lc:test`) | The message appears in the linked channel — this is the call a game makes via `sendLobbyMessage` |
 | A lobby invite for a member | **🏠 Join Discord server** (`lc:join`) | A one-use `discord.gg` invite to the linked channel's server |
 | What Discord tells your app | **Webhooks** page + `GET /api/diag` → `recentEvents` | `PING` when the URL is saved, then one line per subscribed event |
@@ -380,6 +390,7 @@ names Discord already shows to everyone):
 | `linkedChannels` | Which linked channels an `APPLICATION_DEAUTHORIZED` notice would reach (bounded to 10 servers) |
 | `lobbyState` | Whether the stored lobby still exists on Discord's side (and its linked channel) |
 | `payloads` | Whether the Linked Channels **and `/authorize`** messages can be serialised at all |
+| `authorizeCommand` (`?command=authorize`) | The reply the real `/authorize` command just produced (add `&user=<id>` to have that user's stored connection really verified) |
 | `filesystem` (`?fs=1`) | The function's `cwd` and which runtime paths actually exist |
 | `links.botInvite` | Invite URL with `scope=bot+applications.commands` |
 | `links.eventsUrl` | The exact URL to paste on the Developer Portal's Webhooks page |
@@ -387,10 +398,14 @@ names Discord already shows to everyone):
 ```bash
 curl "https://<your-app>/api/diag"
 curl "https://<your-app>/api/diag?guild=<GUILD_ID>&channel=<CHANNEL_ID>"
+curl "https://<your-app>/api/diag?command=authorize&user=<USER_ID>"
 ```
 
 `ok: true` with an empty `problems` array means the deployment is healthy. The
-endpoint is read-only and never calls Discord as a user.
+endpoint never writes to a Discord channel and never changes a token it is not
+asked about: `?command=authorize&user=<id>` runs the command against a stub
+interaction, which means it *verifies* that user's stored connection (and, if
+Discord answers `401`, clears the revoked record exactly as the command does).
 
 ## Environment variables
 

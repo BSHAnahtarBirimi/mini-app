@@ -18,6 +18,15 @@
  *                  which scopes it granted (never the token itself) — the
  *                  scope, not the code, is what decides whether channel
  *                  linking can succeed
+ *   ?command=authorize
+ *                  run the real `/authorize` command against a stubbed
+ *                  interaction and return the reply it would send. Discord's
+ *                  signatures cannot be produced from here, so this is how the
+ *                  command is exercised in a deployment; add `&user=<id>` to
+ *                  have the stored connection really verified with Discord
+ *                  (a `401` clears the revoked record, exactly as the command
+ *                  does)
+ *   ?fs=1          report the function's cwd and which runtime paths exist
  */
 
 import {
@@ -52,6 +61,7 @@ import {
 	buildPanelPayloads,
 } from "../src/utils/linked-channel-panel.js";
 import { buildAuthorizePayloads } from "../src/utils/authorize-panel.js";
+import { createAuthorizeHandler } from "../src/commands/authorize.js";
 
 /** Minimal structural subset of the Vercel node request/response we use. */
 type DiagRequest = {
@@ -151,6 +161,59 @@ function buildPayloadsProbe(): { ok: boolean; errors: string[] } {
 	);
 
 	return { ok: errors.length === 0, errors };
+}
+
+/**
+ * Runs the real `/authorize` command against a stubbed interaction
+ * (`?command=authorize`).
+ *
+ * Discord signs interactions with the application's private key, so the command
+ * cannot be triggered over HTTP from outside Discord — and waiting for a human
+ * to press it is how a broken recovery path stays broken. Calling the command's
+ * own handler with a stub that records `deferReply()`/`editReply()` exercises
+ * everything downstream of Discord: the option parsing, the stored-token read,
+ * the Discord token check and the payload it would send.
+ *
+ * Nothing is written to a channel and no token is altered by a successful
+ * check. With `?user=<id>` the stored connection is really verified, which is
+ * the point — and if Discord answers `401` the revoked record is cleared, the
+ * same thing the command does when a human runs it.
+ */
+async function probeAuthorizeCommand(userId: string | undefined): Promise<{
+	ok: boolean;
+	deferred: boolean;
+	replies: unknown[];
+	error: string | null;
+}> {
+	let deferred = false;
+	const replies: unknown[] = [];
+
+	const stub = {
+		...(userId ? { member: { user: { id: userId } } } : {}),
+		deferReply: async (payload: unknown) => {
+			deferred = true;
+			void payload;
+		},
+		// The builders serialise through toJSON(), exactly as the request
+		// serializer does when the reply is sent to Discord.
+		editReply: async (payload: unknown) => {
+			replies.push(JSON.parse(JSON.stringify(payload ?? null)));
+		},
+	};
+
+	try {
+		const handler = createAuthorizeHandler() as unknown as (interaction: unknown) => Promise<unknown>;
+		await handler(stub);
+	} catch (error) {
+		return { ok: false, deferred, replies, error: describeError(error) };
+	}
+
+	return {
+		ok: deferred && replies.length > 0,
+		deferred,
+		replies,
+		error: replies.length > 0 ? null : "the handler produced no reply",
+	};
 }
 
 /**
@@ -350,8 +413,22 @@ export default async function handler(req: DiagRequest, res: DiagResponse): Prom
 	// hundreds of Discord calls.
 	const linkedChannels = await probe(() => linkedChannelTargets());
 	const payloads = buildPayloadsProbe();
+	const authorizeCommand =
+		url.searchParams.get("command") === "authorize"
+			? await probeAuthorizeCommand(userId ?? undefined)
+			: undefined;
 
 	const problems = deriveProblems({
+		...(authorizeCommand
+			? {
+					authorizeCommand: {
+						ok: authorizeCommand.ok,
+						deferred: authorizeCommand.deferred,
+						replies: authorizeCommand.replies.length,
+						error: authorizeCommand.error,
+					},
+				}
+			: {}),
 		payloads,
 		env,
 		modules: {
@@ -397,6 +474,7 @@ export default async function handler(req: DiagRequest, res: DiagResponse): Prom
 		recentEvents,
 		linkedChannels,
 		payloads,
+		...(authorizeCommand ? { authorizeCommand } : {}),
 		channels,
 		selectedChannel,
 		lobby,
