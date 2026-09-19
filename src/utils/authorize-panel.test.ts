@@ -54,6 +54,18 @@ const statuses: Record<string, AuthorizeStatus> = {
 		scope: "sdk.social_layer_presence sdk.social_layer openid",
 		hasSocialLayer: true,
 	},
+	// Discord answered 401: the record has been cleared and the message has to
+	// say so, because nothing else in the app can tell the user this happened.
+	revoked: { connected: false, hasSocialLayer: false, revoked: true },
+	// Discord was asked and did not answer: a connection that cannot be
+	// confirmed is reported as unconfirmed rather than as working.
+	unverified: {
+		connected: true,
+		scope: "openid sdk.social_layer",
+		hasSocialLayer: true,
+		verified: false,
+		verifyError: "Discord did not answer within 5s.",
+	},
 };
 
 test("the payloads can be built for every connection state, link or no link", () => {
@@ -120,6 +132,12 @@ test("the status line says what is actually wrong with the connection", () => {
 	assert.match(statusLine(statuses.partial!), /sdk\.social_layer` is missing/);
 	assert.match(statusLine(statuses.partial!), /Re-authorize/);
 	assert.match(statusLine(statuses.ready!), /connected as/);
+	assert.match(statusLine(statuses.ready!), /confirmed by Discord/);
 	assert.match(statusLine(statuses.ready!), /Authorized Apps/, "it explains how a token dies silently");
+	assert.match(statusLine(statuses.revoked!), /revoked/);
+	assert.match(statusLine(statuses.revoked!), /record has been cleared/);
+	assert.doesNotMatch(statusLine(statuses.revoked!), /connected as/, "a revoked record is not a connection");
+	assert.match(statusLine(statuses.unverified!), /could not be confirmed/);
+	assert.match(statusLine(statuses.unverified!), /within 5s/);
 	assert.equal(MessageFlags.Ephemeral & AUTHORIZE_V2_FLAGS, 0, "the V2 payload must not carry Ephemeral");
 });

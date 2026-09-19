@@ -40,6 +40,20 @@ export type AuthorizeStatus = {
 	scope?: string | null;
 	/** Whether `scope` includes `sdk.social_layer`. */
 	hasSocialLayer: boolean;
+	/**
+	 * The stored token was checked with Discord and it is gone (`401`) — the
+	 * record has been cleared. This is what removing the app from **Authorized
+	 * Apps** looks like, and the only state in which the stored scopes are
+	 * meaningless.
+	 */
+	revoked?: boolean;
+	/**
+	 * `false` only when Discord was asked and did not answer — a connection that
+	 * cannot be confirmed is reported as such instead of as working.
+	 */
+	verified?: boolean;
+	/** Why the check could not be completed, when it could not. */
+	verifyError?: string | null;
 };
 
 export type AuthorizePanelData = {
@@ -67,6 +81,13 @@ const HEADING = [
 	"create your lobby invite, and post into the lobby.",
 ].join("\n");
 
+/** Shown instead of the heading when the stored connection is confirmed dead. */
+const REVOKED_HEADING = [
+	"## 🔐 Re-authorize Discord",
+	"Your stored connection was revoked, so the app can no longer act",
+	"for you until you authorize it again.",
+].join("\n");
+
 const SCOPE_NOTE = [
 	"### 🔑 What it asks for",
 	"`openid sdk.social_layer` — the Social SDK scope. It is",
@@ -82,24 +103,38 @@ const FALLBACK_NOTE = [
 
 /** One line describing the stored connection, from the caller's point of view. */
 export function statusLine(status: AuthorizeStatus): string {
+	if (status.revoked) {
+		return [
+			"**Status:** the stored connection was **revoked** — Discord rejected the token (401)",
+			"and the record has been cleared. Nothing that acts for you (linking, unlinking,",
+			"invites, lobby messages) can work until you authorize again below.",
+		].join(" ");
+	}
 	if (!status.connected) return "**Status:** no connection stored yet.";
 	if (!status.hasSocialLayer) {
 		return `**Status:** connected, but the granted scopes are \`${status.scope ?? "unknown"}\` — **\`sdk.social_layer\` is missing**, so linking is refused. Re-authorize below.`;
 	}
-	return `**Status:** connected as \`${status.scope ?? "unknown"}\`. Re-authorize if linking still fails (for example after you removed the app from your Authorized Apps, which revokes the stored token without warning the app).`;
+	if (status.verified === false) {
+		return `**Status:** connected as \`${status.scope ?? "unknown"}\`, but it could not be confirmed with Discord just now${status.verifyError ? ` (${status.verifyError})` : ""}. Re-authorize if linking fails.`;
+	}
+	return `**Status:** connected as \`${status.scope ?? "unknown"}\` (confirmed by Discord). Re-authorize if linking still fails (for example after you removed the app from your Authorized Apps, which revokes the stored token without warning the app).`;
 }
 
 /** The `/authorize` message: what is granted now, and the link to fix it. */
 export function buildAuthorizePayloads(data: AuthorizePanelData): AuthorizePayloadPair {
 	const status = statusLine(data.status);
+	// A revoked record keeps its scope string until it is replaced, so the label
+	// keys off the verdict, not the stored scopes.
+	const hasWorkingScope = Boolean(data.status.hasSocialLayer) && !data.status.revoked;
+	const label = hasWorkingScope ? "🔁 Re-authorize Discord" : "🔐 Authorize Discord";
 	const button = () =>
 		new ButtonBuilder()
 			.setStyle(ButtonStyle.Link)
-			.setLabel(data.status.hasSocialLayer ? "🔁 Re-authorize Discord" : "🔐 Authorize Discord")
+			.setLabel(label)
 			.setURL(data.authorizeUrl ?? "");
 
-	const container = new ContainerBuilder().setAccentColor(0x5865f2);
-	container.addComponent(text(HEADING));
+	const container = new ContainerBuilder().setAccentColor(data.status.revoked ? 0xda373c : 0x5865f2);
+	container.addComponent(text(data.status.revoked ? REVOKED_HEADING : HEADING));
 	container.addComponent(divider());
 	container.addComponent(text(status));
 	container.addComponent(divider());
@@ -113,7 +148,7 @@ export function buildAuthorizePayloads(data: AuthorizePanelData): AuthorizePaylo
 	}
 
 	const legacyContent = [
-		HEADING,
+		data.status.revoked ? REVOKED_HEADING : HEADING,
 		"",
 		status,
 		"",
@@ -128,12 +163,12 @@ export function buildAuthorizePayloads(data: AuthorizePanelData): AuthorizePaylo
 			content: legacyContent,
 			components: data.authorizeUrl
 				? [
-						new ActionRowBuilder<MessageActionRowComponent>().addComponents(
-							new ButtonBuilder()
-								.setStyle(ButtonStyle.Link)
-								.setLabel("🔐 Authorize Discord")
-								.setURL(data.authorizeUrl),
-						),
+					new ActionRowBuilder<MessageActionRowComponent>().addComponents(
+						new ButtonBuilder()
+							.setStyle(ButtonStyle.Link)
+							.setLabel(label)
+							.setURL(data.authorizeUrl),
+					),
 					]
 				: [],
 		},
