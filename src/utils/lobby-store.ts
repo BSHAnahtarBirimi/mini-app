@@ -29,6 +29,14 @@ export function withGuild(list: string[], guildId: string, max = 200): string[] 
 }
 
 /**
+ * Guilds to consider when looking for a stored lobby: both lists, no duplicates,
+ * newest-signal-first order. Pure so the merge rule is unit testable.
+ */
+export function unionGuilds(...lists: string[][]): string[] {
+	return [...new Set(lists.flat().filter((id) => id !== ""))];
+}
+
+/**
  * Records a guild in the index without touching its lobby record.
  *
  * Called wherever a stored lobby is read as well as written: records created

@@ -25,7 +25,7 @@ endpoint file.
 | `src/utils/webhook-events.ts` | Webhook Events router + the deauthorize → linked-channel notice |
 | `src/utils/event-log.ts` | Received events, kept for `/api/diag` and for retry dedupe |
 | `src/utils/lobby-api.ts` | Lobby API wrappers over the package's `DiscordRestClient` (fail-fast: `maxRetries: 0`) |
-| `src/utils/lobby-store.ts` | Per-guild lobby records on `MiniDatabase` (`lc:${guildId}`) |
+| `src/utils/lobby-store.ts` | Per-guild lobby records on `MiniDatabase` (`lc:${guildId}`) + a guild index used as a fallback when enumerating them |
 | `src/utils/channel-privacy.ts` | Pure privacy classifier for `permission_overwrites` |
 | `scripts/register.ts` | Auto-discovers and registers commands + linked-role metadata (manual run) |
 | `scripts/register-deploy.ts` | Same registration, executed by production deploys |
@@ -313,16 +313,29 @@ invalid immediately. `src/utils/webhook-events.ts` therefore
 
 1. **drops the stored connection** (`deleteUserToken`) so the panel stops
    claiming one and `/api/diag?user=…` stops reporting `connected: true`;
-2. **posts a notice in the linked channel** of every lobby that user owns —
-   “_tester disconnected this app from Discord. Channel linking and lobby
-   invites need their Discord connection, so those actions will fail until they
-   reconnect_” — so the server sees why linking stopped working instead of
-   discovering it through a failed click;
+2. **posts a notice in every linked channel this app maintains** — “_tester
+   disconnected this app from Discord. Channel linking and lobby invites need
+   their Discord connection, so those actions will fail until they reconnect_”
+   — so no server has to discover through a failed click that the connection it
+   relies on is gone. Lobbies with no linked channel (or an id Discord has
+   already reaped) are reported, not treated as failures.
 
-…and it names only the servers whose link that user set up: other members'
-connections are unaffected, and announcing a user in a server they merely
-visited would leak their presence there. Lobbies with no linked channel (or an
-id Discord has already reaped) are reported, not treated as failures.
+The notice is deliberately **not** scoped to the servers whose link that user
+created: which account was linked last is not what the other servers need to
+know. To scope it that way, filter the `considered` targets by
+`record.creatorId === user.id` in `notifyLinkedChannelsOfDeauthorization`.
+
+### How it finds the servers
+
+The event payload carries a user id and nothing else, and `MiniDatabase` can only
+read keys you already know — so the guilds come from **Discord itself**
+(`GET /users/@me/guilds`: the bot is in exactly the servers that can have a
+linked channel), and then `lc:${guildId}` is read for each one. The stored index
+(`lc:guilds`) is merged in as a fallback for when that call fails.
+
+That order matters: a write-time index alone is blind to every lobby created
+before the index existed, which is exactly how a channel linked in a second
+server stayed invisible to the first version of this handler.
 
 Delivery is **at-least-once**: the handled marker is written *after* the work
 succeeds, so a failed delivery is retried and processed again, while a duplicate
@@ -352,6 +365,7 @@ names Discord already shows to everyone):
 | `channels`, `selectedChannel`, `lobby` | The Linked Channels channel menu with privacy verdicts, and the stored lobby |
 | `recentFailures` | The last handler failures, which is why a message stayed on "«bot» is thinking…" |
 | `recentEvents` | The last Webhook Events Discord delivered, with what the handler did |
+| `linkedChannels` | Which linked channels an `APPLICATION_DEAUTHORIZED` notice would reach (bounded to 10 servers) |
 | `lobbyState` | Whether the stored lobby still exists on Discord's side (and its linked channel) |
 | `payloads` | Whether the Linked Channels messages can be serialised at all |
 | `filesystem` (`?fs=1`) | The function's `cwd` and which runtime paths actually exist |

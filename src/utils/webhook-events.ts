@@ -14,8 +14,22 @@
  * become invalid. So the handler
  *
  * 1. drops the stored connection, so the panel stops claiming one, and
- * 2. posts a notice in the linked channel of every lobby that user owns, so the
- *    server knows linking will fail until they reconnect.
+ * 2. posts a notice in **every** linked channel this app maintains, so no server
+ *    is left wondering why linking stopped working.
+ *
+ * Two details decide whether that second step actually reaches anyone:
+ *
+ * - **Finding the servers.** The event payload carries a user id and nothing
+ *   else, and `MiniDatabase` can only read keys you already know, so the guilds
+ *   come from Discord itself (`GET /users/@me/guilds` — the bot is in exactly
+ *   the servers that can have a linked channel) merged with the stored index as
+ *   a fallback. A write-time index alone would silently miss every lobby that
+ *   was created before it existed.
+ * - **Who is told.** The notice goes to every guild whose lobby has a linked
+ *   channel, not only to the servers whose link that user created: which
+ *   account was linked last is not what the other servers need to know. To
+ *   scope it back to the user's own links, filter `considered` targets by
+ *   `record.creatorId === user.id` in `notifyLinkedChannelsOfDeauthorization`.
  *
  * Every received event is also logged (`src/utils/event-log.ts`) and reported by
  * `GET /api/diag`, which is how the endpoint and a subscribed event can be
@@ -35,9 +49,10 @@ import {
 	describeLobbyError,
 	getLobby,
 	linkedChannelIdOf,
+	listBotGuilds,
 	sendChannelMessage,
 } from "./lobby-api.ts";
-import { getLobbyRecord, listLobbyGuilds } from "./lobby-store.ts";
+import { getLobbyRecord, listLobbyGuilds, unionGuilds } from "./lobby-store.ts";
 import { deleteUserToken } from "./lobby-tokens.ts";
 
 // ------------------------------------------------------------------ summaries
@@ -122,9 +137,9 @@ export function deliveryKeyOf(payload: WebhookEventPayload | WebhookEventPingPay
 
 // ---------------------------------------------------------------- deauthorize
 
-/** The message posted in a linked channel when its lobby's owner disconnects. */
+/** The message posted in a linked channel when a user disconnects the app. */
 export function deauthorizationMessage(user: { id: string; username?: string }): string {
-	const name = user.username ? `**${user.username}**` : "The account that linked this channel";
+	const name = user.username ? `**${user.username}**` : "A member";
 	return [
 		`👋 ${name} disconnected this app from Discord.`,
 		"Channel linking and lobby invites need their Discord connection, so those actions will fail until they reconnect — `/linked-channel` → **🔁 Reconnect Discord**.",
@@ -144,16 +159,39 @@ export type DeauthorizeDeps = {
 export type DeauthorizeOutcome = {
 	/** `guildId → channelId` for the links that were notified. */
 	notified: { guildId: string; channelId: string }[];
-	/** Guilds owned by the user whose link has no channel to post in. */
+	/** Guilds with a lobby but no linked channel — nothing to post into. */
 	withoutLinkedChannel: string[];
-	/** Lobbies owned by the user, whether or not they had a channel. */
-	ownedGuilds: string[];
+	/** Guilds examined (the bot's servers ∪ the stored index). */
+	considered: string[];
+	/** Of those, the ones whose link this user created — context for the log. */
+	ownedByUser: string[];
 	/** The stored connection was dropped (always attempted first). */
 	connectionDeleted: boolean;
 };
 
+/**
+ * Every guild that might hold a stored lobby.
+ *
+ * Discord's answer is authoritative — the bot is in precisely the servers that
+ * can have a linked channel — and the stored index is merged in as a fallback
+ * for the case where that call fails. Deliberately tolerant: a failure to list
+ * the bot's servers must not stop the ones the index knows about.
+ */
+export async function candidateGuilds(): Promise<string[]> {
+	const [fromDiscord, indexed] = await Promise.all([
+		listBotGuilds()
+			.then((guilds) => guilds.map((guild) => guild.id))
+			.catch((error) => {
+				console.error("[webhook-events] could not list the bot's servers:", error);
+				return [] as string[];
+			}),
+		listLobbyGuilds().catch(() => [] as string[]),
+	]);
+	return unionGuilds(fromDiscord, indexed);
+}
+
 const defaultDeps: DeauthorizeDeps = {
-	listGuilds: listLobbyGuilds,
+	listGuilds: candidateGuilds,
 	getLobbyRecord,
 	readLinkedChannelId: async (lobbyId) => linkedChannelIdOf(await getLobby(lobbyId)),
 	sendChannelMessage: (channelId, content) => sendChannelMessage(channelId, content),
@@ -165,42 +203,89 @@ const defaultDeps: DeauthorizeDeps = {
  *
  * Drops the stored connection first: the tokens are invalid the moment this
  * event fires, and that step is idempotent, so it must not depend on the
- * notification succeeding. Then each lobby the user owns gets a notice in its
- * linked channel — the only server that cared was the one whose link that user
- * set up (other members' connections are unaffected, and announcing a user in
- * servers they merely visited would leak their presence).
+ * notification succeeding. Then **every** linked channel this app maintains is
+ * told, so a server does not have to discover through a failed click that the
+ * connection it relies on is gone — the account that was linked is part of the
+ * message, not a filter.
  */
 export async function notifyLinkedChannelsOfDeauthorization(
 	user: { id: string; username?: string },
 	deps: DeauthorizeDeps = defaultDeps,
 ): Promise<DeauthorizeOutcome> {
+	// Drop the connection first: it is the idempotent half, and it must not
+	// depend on any notification succeeding.
 	await deps.deleteUserToken(user.id);
 
-	const outcome: DeauthorizeOutcome = {
-		notified: [],
-		withoutLinkedChannel: [],
-		ownedGuilds: [],
+	const collected = await collectLinkedChannels(user.id, deps);
+	const notified: { guildId: string; channelId: string }[] = [];
+	for (const target of collected.targets) {
+		await deps.sendChannelMessage(target.channelId, deauthorizationMessage(user));
+		notified.push(target);
+	}
+
+	return {
+		notified,
+		withoutLinkedChannel: collected.withoutLinkedChannel,
+		considered: collected.considered,
+		ownedByUser: collected.ownedByUser,
 		connectionDeleted: true,
 	};
+}
 
-	for (const guildId of await deps.listGuilds()) {
+/** How many servers {@link linkedChannelTargets} will inspect at most. */
+export const LINKED_CHANNEL_TARGET_LIMIT = 10;
+
+/**
+ * Every linked channel this app maintains — exactly what a deauthorization
+ * would notify, and what `GET /api/diag` reports so that answer is checkable
+ * without actually deauthorizing anything.
+ */
+export async function linkedChannelTargets(
+	deps: DeauthorizeDeps = defaultDeps,
+	maxGuilds: number = LINKED_CHANNEL_TARGET_LIMIT,
+): Promise<{ guildId: string; channelId: string }[]> {
+	// No user id: nothing here is filtered by who linked what.
+	return (await collectLinkedChannels("", deps, maxGuilds)).targets;
+}
+
+/**
+ * Walks the candidate servers and reads each stored lobby's live linked channel.
+ *
+ * A lobby without a linked channel has nowhere to post, and its id may have been
+ * reaped by Discord — neither is a failure, so both are recorded and skipped.
+ */
+async function collectLinkedChannels(
+	userId: string,
+	deps: DeauthorizeDeps,
+	maxGuilds: number = Number.POSITIVE_INFINITY,
+): Promise<{
+	targets: { guildId: string; channelId: string }[];
+	withoutLinkedChannel: string[];
+	considered: string[];
+	ownedByUser: string[];
+}> {
+	const targets: { guildId: string; channelId: string }[] = [];
+	const withoutLinkedChannel: string[] = [];
+	const considered: string[] = [];
+	const ownedByUser: string[] = [];
+
+	for (const guildId of (await deps.listGuilds()).slice(0, maxGuilds)) {
+		considered.push(guildId);
+
 		const record = await deps.getLobbyRecord(guildId);
-		if (!record || record.creatorId !== user.id) continue;
-		outcome.ownedGuilds.push(guildId);
+		if (!record) continue;
+		if (userId !== "" && record.creatorId === userId) ownedByUser.push(guildId);
 
-		// A lobby without a linked channel has nowhere to post, and its id may
-		// have been reaped — neither is a failure of this delivery.
 		const channelId = await deps.readLinkedChannelId(record.lobbyId).catch(() => null);
 		if (!channelId) {
-			outcome.withoutLinkedChannel.push(guildId);
+			withoutLinkedChannel.push(guildId);
 			continue;
 		}
 
-		await deps.sendChannelMessage(channelId, deauthorizationMessage(user));
-		outcome.notified.push({ guildId, channelId });
+		targets.push({ guildId, channelId });
 	}
 
-	return outcome;
+	return { targets, withoutLinkedChannel, considered, ownedByUser };
 }
 
 // --------------------------------------------------------------------- router
@@ -244,7 +329,7 @@ export function buildEventRouter(): WebhookEventRouter {
 				key,
 				handled: [
 					outcome.connectionDeleted ? "connection dropped" : "",
-					`${outcome.notified.length} linked channel(s) notified`,
+					`${outcome.notified.length} of ${outcome.considered.length} server(s) notified`,
 					outcome.withoutLinkedChannel.length > 0
 						? `${outcome.withoutLinkedChannel.length} without a linked channel`
 						: "",
