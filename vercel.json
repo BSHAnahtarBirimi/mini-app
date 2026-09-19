@@ -14,10 +14,15 @@
 			"maxDuration": 10,
 			"includeFiles": "src/**"
 		},
+		"api/diag.ts": {
+			"maxDuration": 15,
+			"includeFiles": "src/**"
+		},
 		"api/discord-oauth-callback.ts": {
 			"maxDuration": 10,
 			"includeFiles": "public/pages/**"
 		}
 	},
-	"installCommand": "npm install"
+	"installCommand": "npm install",
+	"buildCommand": "npm run build && npm run register:deploy"
 }
