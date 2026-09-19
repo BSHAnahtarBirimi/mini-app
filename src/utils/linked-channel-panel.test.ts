@@ -76,9 +76,9 @@ test("the panel payloads can be built at all, with and without the reconnect but
 	}
 });
 
-test("the V2 panel exposes link, unlink and join", () => {
+test("the V2 panel exposes link, unlink, test and join", () => {
 	const ids = customIds(jsonOf(buildPanelPayloads(data).v2)).filter((id) => id.startsWith("lc:"));
-	assert.deepEqual(ids, ["lc:link", "lc:unlink", "lc:join"]);
+	assert.deepEqual(ids, ["lc:link", "lc:unlink", "lc:test", "lc:join"]);
 });
 
 test("every section carries an accessory — the library throws otherwise", () => {
@@ -107,7 +107,7 @@ test("the legacy panel is a legal edit: no V2 flag, a content body, same actions
 	assert.match(legacy.content, /oauth2\/authorize/, "the reconnect URL must still be reachable");
 	assert.deepEqual(
 		customIds(legacy.components).filter((id) => id.startsWith("lc:")),
-		["lc:link", "lc:unlink", "lc:join"],
+		["lc:link", "lc:unlink", "lc:test", "lc:join"],
 	);
 });
 

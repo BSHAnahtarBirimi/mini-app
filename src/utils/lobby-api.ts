@@ -191,6 +191,48 @@ export function createLobbyChannelInviteForSelf(
 }
 
 /**
+ * Sends a message to a channel as the bot (bot auth).
+ *
+ * Used by the `APPLICATION_DEAUTHORIZED` webhook event to tell the linked
+ * channel that the account which set the link up is gone. The bot needs View
+ * Channel + Send Messages there, which the app's own invite URL already
+ * requests.
+ */
+export function sendChannelMessage(
+	channelId: string,
+	content: string,
+): Promise<{ id: string }> {
+	return call("post to the linked channel", (client) =>
+		client.sendMessage({ channelId, content }) as Promise<{ id: string }>,
+	);
+}
+
+/**
+ * Posts a message into the lobby from the calling user's account (USER token +
+ * `sdk.social_layer`).
+ *
+ * This is the call a game makes from inside the Social SDK: the message lands
+ * in the lobby's linked channel and is what the panel's "Send a test message"
+ * button exercises, so the linked-channel path can be checked without a game
+ * client. Requires a linked channel and a lobby membership carrying the Social
+ * SDK flags.
+ */
+export function sendLobbyMessage(
+	lobbyId: string,
+	content: string,
+	userToken: string,
+): Promise<{ id: string }> {
+	return call("post into the lobby", (client) =>
+		client.sendLobbyMessage(lobbyId, { content }, userToken) as Promise<{ id: string }>,
+	);
+}
+
+/** The channel a lobby currently links to, or null when it links none. */
+export function linkedChannelIdOf(lobby: APILobby): string | null {
+	return lobby.linked_channel?.id ?? null;
+}
+
+/**
  * Reads a lobby (bot auth).
  *
  * Used to check whether the stored lobby still exists: lobbies are session

@@ -5,6 +5,7 @@ import { getLobbyRecord } from "../utils/lobby-store.ts";
 import { listGuildChannelsForMenu } from "../utils/lobby-channels.ts";
 import { hasSocialLayerScope } from "../utils/lobby-oauth.ts";
 import { getFreshUserToken } from "../utils/lobby-tokens.ts";
+import { DiscordRestApiError } from "../utils/lobby-api.ts";
 import { buildChannelMenuPayloads } from "../utils/linked-channel-panel.ts";
 import { describeError, recordInteractionError } from "../utils/interaction-errors.ts";
 
@@ -64,8 +65,18 @@ export const linkButton = {
 			} catch (error) {
 				console.error("[lc:link] channel listing failed:", error);
 				await recordInteractionError(error, "lc:link:list-channels");
+				// 403 Missing Access here almost always means the bot is not a member
+				// of *this* server (commands can be installed with the
+				// `applications.commands` scope alone, which is enough to run them
+				// but not to read the channel list).
+				const missingAccess = error instanceof DiscordRestApiError && error.status === 403;
 				return await interaction.editReply({
-					content: "❌ Could not list this server's channels. Please try again later.",
+					content: missingAccess
+						? [
+							"❌ **The bot is not in this server**, so it cannot read its channels.",
+							"Install it here with **`links.botInvite`** from `/api/diag` (`scope=bot+applications.commands`), then try again.",
+						].join("\n")
+						: "❌ Could not list this server's channels. Please try again later.",
 				});
 			}
 

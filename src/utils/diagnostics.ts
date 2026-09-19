@@ -69,7 +69,19 @@ export type DiagInput = {
 	 * is not durable — `404 Unknown Lobby` on the next link is exactly this.
 	 */
 	lobbyState?: Probe<{ id: string; linkedChannelId: string | null }>;
+	/**
+	 * The newest Webhook Events this deployment received, newest first.
+	 *
+	 * The Webhooks endpoint leaves no other trace: without this, "did Discord
+	 * ever call us?" can only be answered from the dashboard's runtime logs.
+	 */
+	recentEvents?: { at: string; type: string; summary: string; handled?: string }[];
 };
+
+/** URL to paste into the Developer Portal's Webhooks → Endpoint URL field. */
+export function buildEventsUrl(baseUrl: string): string {
+	return `${baseUrl.replace(/\/+$/, "")}/api/discord-events`;
+}
 
 /** True when a probe was rejected by Discord for a bad/expired token. */
 export function isAuthFailure(probe: Probe<unknown>): boolean {
@@ -213,6 +225,16 @@ export function deriveProblems(input: DiagInput): string[] {
 	if (!input.env.DISCORD_CLIENT_SECRET || !input.env.DISCORD_REDIRECT_URI) {
 		problems.push(
 			"DISCORD_CLIENT_SECRET and/or DISCORD_REDIRECT_URI are missing — the /linked-channel \"Reconnect Discord\" button (openid sdk.social_layer) cannot be built.",
+		);
+	}
+
+	// 10. Webhook Events are opt-in per deployment (the endpoint URL is pasted
+	//     into the Developer Portal). Never receiving anything means either that
+	//     step is missing or Discord gave up on the endpoint — Discord sends a
+	//     PING the moment the URL is saved, so an empty log is a strong signal.
+	if (input.recentEvents && input.recentEvents.length === 0) {
+		problems.push(
+			"No Webhook Events have been received yet — add the URL from `links.eventsUrl` on the app's **Webhooks** page in the Developer Portal, then enable and tick the events you want (Discord sends a PING as soon as you save the URL). Deauthorization notices and lobby-message events need this.",
 		);
 	}
 

@@ -10,6 +10,7 @@ import { confirmLinkButton } from "../components/lc_confirm.ts";
 import { cancelLinkButton } from "../components/lc_cancel.ts";
 import { unlinkButton } from "../components/lc_unlink.ts";
 import { joinServerButton } from "../components/lc_join.ts";
+import { sendTestMessageButton } from "../components/lc_test.ts";
 
 /**
  * Regression guard for "the command does nothing".
@@ -71,6 +72,7 @@ const handlers: [string, { handler: (interaction: never) => Promise<unknown> }][
 	["lc:cancel", cancelLinkButton as never],
 	["lc:unlink", unlinkButton as never],
 	["lc:join", joinServerButton as never],
+	["lc:test", sendTestMessageButton as never],
 ];
 
 for (const [name, module] of handlers) {

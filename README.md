@@ -13,6 +13,7 @@ endpoint file.
 | `api/index.ts` | Linked-roles landing page (`index.html`) |
 | `api/discord-oauth-callback.ts` | OAuth2 callback: stores tokens in `MiniDatabase`, updates role metadata |
 | `api/diag.ts` | Read-only diagnostics: bot token, guild membership, registered commands |
+| `api/discord-events.ts` | Webhook Events endpoint (PING, `APPLICATION_DEAUTHORIZED`, …) |
 | `src/commands/ping.ts` | `/ping` — Components V2 container + section + button |
 | `src/commands/echo.ts` | `/echo` — typed option resolver demo |
 | `src/components/ping_button.ts` | Button → modal with a modal-side select menu |
@@ -20,7 +21,9 @@ endpoint file.
 | `src/modals/ping_modal.ts` | Modal submit handler |
 | `src/utils/database.ts` | Shared `MiniDatabase` instance + helpers |
 | `src/commands/linked-channel.ts` | `/linked-channel` — Linked Channels admin panel |
-| `src/components/lc_*.ts` | Linked Channels flow components (`lc:link`, `lc:pick`, `lc:confirm`, `lc:cancel`, `lc:unlink`, `lc:join`) |
+| `src/components/lc_*.ts` | Linked Channels flow components (`lc:link`, `lc:pick`, `lc:confirm`, `lc:cancel`, `lc:unlink`, `lc:join`, `lc:test`) |
+| `src/utils/webhook-events.ts` | Webhook Events router + the deauthorize → linked-channel notice |
+| `src/utils/event-log.ts` | Received events, kept for `/api/diag` and for retry dedupe |
 | `src/utils/lobby-api.ts` | Lobby API wrappers over the package's `DiscordRestClient` (fail-fast: `maxRetries: 0`) |
 | `src/utils/lobby-store.ts` | Per-guild lobby records on `MiniDatabase` (`lc:${guildId}`) |
 | `src/utils/channel-privacy.ts` | Pure privacy classifier for `permission_overwrites` |
@@ -228,6 +231,29 @@ interactions can be served by different serverless instances.
 
 Run the pure-logic tests with `npm test`.
 
+### How to test Linked Channels
+
+The linked-channel *experience* — players reading and posting the channel from
+inside the game — only exists inside a Social SDK client, so there is no
+browser UI for it. Everything on Discord's side can still be exercised in a real
+server, and the parts Discord never shows you are covered by the webhook events
+and the test message:
+
+| What | Where | What you see |
+| --- | --- | --- |
+| Panel, channel pick, warning step, link/unlink | `/linked-channel` in your server | The panel and its ephemeral answers |
+| Restore a connection | **🔁 Reconnect Discord** on the panel | The OAuth page, then `userToken.hasSocialLayer: true` in `/api/diag?user=…` |
+| A message going *through* the lobby | **✉️ Send a test message** on the panel (`lc:test`) | The message appears in the linked channel — this is the call a game makes via `sendLobbyMessage` |
+| A lobby invite for a member | **🏠 Join Discord server** (`lc:join`) | A one-use `discord.gg` invite to the linked channel's server |
+| What Discord tells your app | **Webhooks** page + `GET /api/diag` → `recentEvents` | `PING` when the URL is saved, then one line per subscribed event |
+| The link itself | `/api/diag?guild=<id>` → `lobbyState` | The stored lobby's live state and its `linkedChannelId` |
+
+So the shortest end-to-end check is: `/linked-channel` → **Link a channel** →
+pick a channel → **Link anyway** → **✉️ Send a test message**, and watch your
+message arrive in the channel. A message posted in the channel by a real user
+posts *into* the lobby as well, which is why the linked channel is a two-way
+bridge once a game is connected.
+
 ### Package version note
 
 Built on `@minesa-org/mini-interaction` **v0.14.0**, which ships the full Lobby
@@ -252,6 +278,63 @@ npm pkg set 'dependencies.@minesa-org/mini-interaction=file:vendor/mini-interact
 npm install
 ```
 
+## Webhook Events
+
+`api/discord-events.ts` serves Discord's **Webhook Events** ("outgoing
+webhooks") — the one-way events Discord POSTs to your app, as opposed to the
+interactions Discord sends when someone uses a command. They are the only
+out-of-game signal for a user deauthorizing the app and for messages moving
+through a linked channel, and unlike Gateway events they are **not realtime and
+not ordered**, and are retried with backoff for up to 10 minutes.
+
+### Set it up in the Developer Portal
+
+1. `GET /api/diag` and copy `links.eventsUrl` (it is
+   `https://<your-deployment>/api/discord-events`).
+2. Open your app → **Webhooks** → paste it into **Endpoint URL**.
+3. Enable **Events** and tick the ones you want — `APPLICATION_DEAUTHORIZED` for
+the example below, and `LOBBY_MESSAGE_CREATE` if you want to watch a linked
+channel being used.
+4. **Save Changes.** Discord sends a `PING` immediately; it appears in
+   `/api/diag` → `recentEvents` as soon as the endpoint is accepted.
+
+The URL is verified with the same Ed25519 headers as interactions, and Discord
+routinely re-checks it with **deliberately invalid signatures** — an endpoint
+that answers those with anything but `401` gets its URL removed. Both are
+enforced in `api/discord-events.ts` (and covered by
+`src/utils/discord-events-endpoint.test.ts`, which drives the real handler with
+real signatures).
+
+### The example: `APPLICATION_DEAUTHORIZED`
+
+For a Social SDK app, a deauthorization is *the* state change to react to: every
+revocation is mechanically an unmerge, and the user's OAuth2 tokens become
+invalid immediately. `src/utils/webhook-events.ts` therefore
+
+1. **drops the stored connection** (`deleteUserToken`) so the panel stops
+   claiming one and `/api/diag?user=…` stops reporting `connected: true`;
+2. **posts a notice in the linked channel** of every lobby that user owns —
+   “_tester disconnected this app from Discord. Channel linking and lobby
+   invites need their Discord connection, so those actions will fail until they
+   reconnect_” — so the server sees why linking stopped working instead of
+   discovering it through a failed click;
+
+…and it names only the servers whose link that user set up: other members'
+connections are unaffected, and announcing a user in a server they merely
+visited would leak their presence there. Lobbies with no linked channel (or an
+id Discord has already reaped) are reported, not treated as failures.
+
+Delivery is **at-least-once**: the handled marker is written *after* the work
+succeeds, so a failed delivery is retried and processed again, while a duplicate
+of a delivery that succeeded is recognised (the payload repeats
+`event.timestamp`, which is what the dedupe key uses). Deauthorization is your
+real-world test: remove the app from **User Settings → Authorized Apps**, and
+the notice lands in the linked channel.
+
+Every received event is logged and returned by `/api/diag` as `recentEvents`,
+which is also how you confirm a subscription is live — the `handled` field says
+what the handler did with it.
+
 ## Diagnostics
 
 Vercel runtime logs need dashboard access, so the app answers the same
@@ -268,10 +351,12 @@ names Discord already shows to everyone):
 | `registered.global` / `registered.guild` | Which commands Discord currently has |
 | `channels`, `selectedChannel`, `lobby` | The Linked Channels channel menu with privacy verdicts, and the stored lobby |
 | `recentFailures` | The last handler failures, which is why a message stayed on "«bot» is thinking…" |
+| `recentEvents` | The last Webhook Events Discord delivered, with what the handler did |
 | `lobbyState` | Whether the stored lobby still exists on Discord's side (and its linked channel) |
 | `payloads` | Whether the Linked Channels messages can be serialised at all |
 | `filesystem` (`?fs=1`) | The function's `cwd` and which runtime paths actually exist |
 | `links.botInvite` | Invite URL with `scope=bot+applications.commands` |
+| `links.eventsUrl` | The exact URL to paste on the Developer Portal's Webhooks page |
 
 ```bash
 curl "https://<your-app>/api/diag"

@@ -32,6 +32,7 @@ import path from "node:path";
 import {
 	DIAG_ENV_VARS,
 	buildBotInviteUrl,
+	buildEventsUrl,
 	deriveProblems,
 } from "../src/utils/diagnostics.js";
 import type { DiagEnvVar, Probe } from "../src/utils/diagnostics.js";
@@ -44,13 +45,28 @@ import { getLobbyRecord } from "../src/utils/lobby-store.js";
 import type { LobbyRecord } from "../src/utils/lobby-store.js";
 import { describeLobbyError, getLobby } from "../src/utils/lobby-api.js";
 import { describeError, getInteractionErrors } from "../src/utils/interaction-errors.js";
+import { getRecentEvents } from "../src/utils/event-log.js";
 import {
 	buildChannelMenuPayloads,
 	buildPanelPayloads,
 } from "../src/utils/linked-channel-panel.js";
 
 /** Minimal structural subset of the Vercel node request/response we use. */
-type DiagRequest = { method?: string; url?: string };
+type DiagRequest = {
+	method?: string;
+	url?: string;
+	headers?: Record<string, string | string[] | undefined>;
+};
+
+/** Case-insensitive header lookup on the plain header record Vercel passes. */
+function headerValue(
+	headers: DiagRequest["headers"],
+	name: string,
+): string | undefined {
+	if (!headers) return undefined;
+	const direct = headers[name] ?? headers[name.toLowerCase()] ?? headers[name.toUpperCase()];
+	return Array.isArray(direct) ? direct[0] : direct;
+}
 type DiagResponse = {
 	statusCode: number;
 	setHeader(name: string, value: string): void;
@@ -194,6 +210,8 @@ export default async function handler(req: DiagRequest, res: DiagResponse): Prom
 	const channelId = url.searchParams.get("channel");
 	const applicationId = process.env.DISCORD_APPLICATION_ID ?? process.env.DISCORD_APP_ID ?? null;
 	const botToken = process.env.DISCORD_BOT_TOKEN ?? process.env.DISCORD_TOKEN ?? null;
+	// Used to report this deployment's own Webhook Events URL (`links.eventsUrl`).
+	const hostHeader = headerValue(req.headers, "host") ?? process.env.VERCEL_URL ?? null;
 
 	const env = Object.fromEntries(
 		DIAG_ENV_VARS.map((key: DiagEnvVar) => [key, Boolean(process.env[key])]),
@@ -291,6 +309,9 @@ export default async function handler(req: DiagRequest, res: DiagResponse): Prom
 	// only place a "«bot» is thinking…" cause becomes visible without dashboard
 	// access — the framework logs those to console.error and nowhere else.
 	const recentFailures = await getInteractionErrors();
+	// What Discord's Webhook Events endpoint sent us. Recording them is the only
+	// way to tell "never configured" from "configured, nothing happened yet".
+	const recentEvents = await getRecentEvents();
 	const payloads = buildPayloadsProbe();
 
 	const problems = deriveProblems({
@@ -303,6 +324,7 @@ export default async function handler(req: DiagRequest, res: DiagResponse): Prom
 			error: modules.error,
 		},
 		recentFailures,
+		recentEvents,
 		lobbyState,
 		expectedCommands: modules.expectedCommands,
 		bot,
@@ -335,6 +357,7 @@ export default async function handler(req: DiagRequest, res: DiagResponse): Prom
 		userId,
 		userToken,
 		recentFailures,
+		recentEvents,
 		payloads,
 		channels,
 		selectedChannel,
@@ -342,6 +365,11 @@ export default async function handler(req: DiagRequest, res: DiagResponse): Prom
 		lobbyState,
 		links: {
 			botInvite: applicationId ? buildBotInviteUrl(applicationId) : null,
+			// The exact URL to paste on the app's Webhooks page. Derived from the
+			// request, so a preview deployment reports its own host.
+			eventsUrl: buildEventsUrl(
+				hostHeader ? `https://${hostHeader}` : (process.env.DISCORD_REDIRECT_URI ?? ""),
+			),
 			socialSdkOAuth:
 				applicationId && process.env.DISCORD_REDIRECT_URI
 					? buildSocialSdkOAuthUrl({

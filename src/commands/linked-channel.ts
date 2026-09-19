@@ -5,7 +5,7 @@ import {
 	DATABASE_NOT_CONFIGURED_MESSAGE,
 	hasDatabaseConfig,
 } from "../utils/database.ts";
-import { getLobbyRecord } from "../utils/lobby-store.ts";
+import { getLobbyRecord, indexLobbyGuild } from "../utils/lobby-store.ts";
 import { describeLobbyError, DiscordRestApiError } from "../utils/lobby-api.ts";
 import { provisionLobby } from "../utils/lobby-lifecycle.ts";
 import { hasSocialLayerScope, buildSocialSdkOAuthUrl } from "../utils/lobby-oauth.ts";
@@ -100,6 +100,14 @@ export const linkedChannelCommand = {
 					});
 				}
 			}
+
+			// Keep the guild index current. The deauthorize webhook starts from a
+			// user id and can only find servers through this index, so a lobby
+			// created before it existed must be indexed when it is read, not only
+			// when it is written.
+			await indexLobbyGuild(guildId).catch((error) =>
+				console.error("[linked-channel] could not index the guild:", error),
+			);
 
 			// Scope check on the invoking admin's stored token: channel linking
 			// needs a USER OAuth2 Bearer token carrying `sdk.social_layer` — the

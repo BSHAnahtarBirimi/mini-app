@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildBotInviteUrl, deriveProblems } from "./diagnostics.ts";
+import { buildBotInviteUrl, buildEventsUrl, deriveProblems } from "./diagnostics.ts";
 import type { DiagInput } from "./diagnostics.ts";
 
 /** A deployment where everything works — the baseline each test perturbs. */
@@ -198,6 +198,36 @@ test("a connection that already has the Social SDK scope adds no problem", () =>
 		userToken: { connected: true, scope: "openid sdk.social_layer", hasSocialLayer: true },
 	};
 	assert.deepEqual(deriveProblems(input), []);
+});
+
+test("never having received a webhook event points at the Developer Portal step", () => {
+	const problems = joined({ ...healthy(), recentEvents: [] });
+	assert.match(problems, /No Webhook Events have been received yet/);
+	assert.match(problems, /Webhooks.*page/s, "it must say where the URL goes");
+});
+
+test("a received event clears that problem, including a PING from saving the URL", () => {
+	const problems = joined({
+		...healthy(),
+		recentEvents: [
+			{
+				at: "2026-09-19T20:30:00.000Z",
+				type: "PING",
+				summary: "endpoint validation for app 1",
+				handled: "acknowledged with 204",
+			},
+		],
+	});
+	assert.doesNotMatch(problems, /Webhook Events/);
+});
+
+test("the events URL is reported for the request's own host", () => {
+	assert.equal(
+		buildEventsUrl("https://mini-app-bshanahtarbirimi.vercel.app"),
+		"https://mini-app-bshanahtarbirimi.vercel.app/api/discord-events",
+	);
+	// A trailing slash must not produce a doubled path.
+	assert.equal(buildEventsUrl("https://example.com/"), "https://example.com/api/discord-events");
 });
 
 test("invite URL installs the bot with the commands scope", () => {
