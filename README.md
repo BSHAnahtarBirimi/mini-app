@@ -379,7 +379,7 @@ names Discord already shows to everyone):
 | `recentEvents` | The last Webhook Events Discord delivered, with what the handler did |
 | `linkedChannels` | Which linked channels an `APPLICATION_DEAUTHORIZED` notice would reach (bounded to 10 servers) |
 | `lobbyState` | Whether the stored lobby still exists on Discord's side (and its linked channel) |
-| `payloads` | Whether the Linked Channels messages can be serialised at all |
+| `payloads` | Whether the Linked Channels **and `/authorize`** messages can be serialised at all |
 | `filesystem` (`?fs=1`) | The function's `cwd` and which runtime paths actually exist |
 | `links.botInvite` | Invite URL with `scope=bot+applications.commands` |
 | `links.eventsUrl` | The exact URL to paste on the Developer Portal's Webhooks page |
