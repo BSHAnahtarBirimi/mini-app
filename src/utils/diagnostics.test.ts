@@ -68,6 +68,22 @@ test("a recorded handler failure is reported — it is what leaves a button thin
 	assert.match(problems, /thinking/);
 });
 
+test("an OAuth callback failure is not described as a thinking interaction", () => {
+	const problems = joined({
+		...healthy(),
+		recentFailures: [
+			{
+				at: "2026-09-19T19:16:36.765Z",
+				context: "discord-oauth-callback",
+				message: "Failed to get OAuth tokens: [400] Bad Request",
+			},
+		],
+	});
+	assert.match(problems, /Failed to get OAuth tokens/);
+	assert.match(problems, /shown on the OAuth page/);
+	assert.doesNotMatch(problems, /thinking/);
+});
+
 test("only the newest failure is reported, so the list stays readable", () => {
 	const problems = joined({
 		...healthy(),
