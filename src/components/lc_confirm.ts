@@ -4,8 +4,8 @@ import type { ComponentHandler } from "@minesa-org/mini-interaction";
 import { getLobbyRecord } from "../utils/lobby-store.ts";
 import type { LobbyRecord } from "../utils/lobby-store.ts";
 import { getPendingLink, clearPendingLink } from "../utils/linked-channel-state.ts";
-import { getFreshUserToken } from "../utils/lobby-tokens.ts";
-import { hasSocialLayerScope } from "../utils/lobby-oauth.ts";
+import { deleteUserToken, getFreshUserToken } from "../utils/lobby-tokens.ts";
+import { hasSocialLayerScope, REVOKED_CONNECTION_HINT } from "../utils/lobby-oauth.ts";
 import {
 	linkChannelToLobby,
 	describeLobbyError,
@@ -103,6 +103,15 @@ export const confirmLinkButton = {
 						"Nothing was linked and the request was **not** retried. This is usually the development cap of **20 link calls per 2 hours** per application while the app is unapproved — wait before retrying, or check `openid sdk.social_layer` on your connection with `/api/diag`.",
 					].join("\n"),
 				});
+			}
+			// A 401 means Discord rejected the stored user token — the account
+			// revoked the app (often without the deauthorization event reaching
+			// us). Drop the dead record so nothing keeps claiming a connection.
+			if (error instanceof DiscordRestApiError && error.status === 401) {
+				console.error("[lc:confirm] stored connection was revoked:", error.body);
+				await deleteUserToken(userId).catch(() => undefined);
+				await recordInteractionError(error, "lc:confirm:revoked");
+				return interaction.editReply({ content: REVOKED_CONNECTION_HINT });
 			}
 			// The one failure that is not about permissions or scopes: the
 			// application-wide development cap. Say what to do about it.

@@ -10,6 +10,24 @@
 import { OAuth2Builder } from "@minesa-org/mini-interaction";
 
 /**
+ * The slash command that (re-)authorizes this app, for messages that tell the
+ * user to restore their connection.
+ */
+export const AUTHORIZE_COMMAND = "/authorize";
+
+/**
+ * What to say when Discord answers a user-token call with `401`.
+ *
+ * A token can be revoked without the app being told (the deauthorization event
+ * only reaches a configured Webhooks endpoint, and Discord never replays it),
+ * so the stored record keeps looking valid while every call fails. The handlers
+ * that see a 401 drop the record — this is the wording they use, so the next
+ * step is the same everywhere.
+ */
+export const REVOKED_CONNECTION_HINT =
+	"⚠️ **Your Discord connection was revoked.** Discord rejected the stored token (401), so it has been cleared — run `/authorize` to grant it again, then retry.";
+
+/**
  * True if a stored OAuth scope string grants the Social SDK scope
  * (`openid sdk.social_layer` is what Linked Channels needs).
  */
