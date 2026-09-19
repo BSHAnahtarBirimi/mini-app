@@ -21,7 +21,9 @@ endpoint file.
 | `src/modals/ping_modal.ts` | Modal submit handler |
 | `src/utils/database.ts` | Shared `MiniDatabase` instance + helpers |
 | `src/commands/linked-channel.ts` | `/linked-channel` — Linked Channels admin panel |
+| `src/commands/authorize.ts` | `/authorize` — grants (or restores) this app's connection to your account |
 | `src/components/lc_*.ts` | Linked Channels flow components (`lc:link`, `lc:pick`, `lc:confirm`, `lc:cancel`, `lc:unlink`, `lc:join`, `lc:test`) |
+| `src/utils/authorize-panel.ts` | The `/authorize` message: connection status + the consent link |
 | `src/utils/webhook-events.ts` | Webhook Events router + the deauthorize → linked-channel notice |
 | `src/utils/event-log.ts` | Received events, kept for `/api/diag` and for retry dedupe |
 | `src/utils/lobby-api.ts` | Lobby API wrappers over the package's `DiscordRestClient` (fail-fast: `maxRetries: 0`) |
@@ -214,6 +216,16 @@ Lobby API (see `docs.discord.com/developers/resources/lobby`):
   with those scopes. While the app is unapproved, channel linking is capped at
   **20 calls per 2 hours per application** — failed links are shown to the
   user and never retried in a loop.
+- **`/authorize` grants that connection** without leaving Discord: it answers
+  with the current status of your stored connection and an
+  **Authorize / Re-authorize Discord** link button (`openid sdk.social_layer`,
+  `prompt=consent`). It is the same URL as the panel's **🔁 Reconnect Discord**
+  button, and it is the recovery path whenever linking reports a scope problem.
+- **A revoked connection is detected.** If Discord answers a user-token call
+  with `401`, the stored record is dropped and the reply says to run
+  `/authorize` — otherwise the app keeps reporting `connected: true` for a token
+  that cannot do anything (which is what happens when the account removes the
+  app and the deauthorization event never reached the endpoint).
 
 ### When it does not link
 
@@ -242,7 +254,7 @@ and the test message:
 | What | Where | What you see |
 | --- | --- | --- |
 | Panel, channel pick, warning step, link/unlink | `/linked-channel` in your server | The panel and its ephemeral answers |
-| Restore a connection | **🔁 Reconnect Discord** on the panel | The OAuth page, then `userToken.hasSocialLayer: true` in `/api/diag?user=…` |
+| Grant / restore your connection | **`/authorize`** (or **🔁 Reconnect Discord** on the panel) | The consent page, then `userToken.hasSocialLayer: true` in `/api/diag?user=…` |
 | A message going *through* the lobby | **✉️ Send a test message** on the panel (`lc:test`) | The message appears in the linked channel — this is the call a game makes via `sendLobbyMessage` |
 | A lobby invite for a member | **🏠 Join Discord server** (`lc:join`) | A one-use `discord.gg` invite to the linked channel's server |
 | What Discord tells your app | **Webhooks** page + `GET /api/diag` → `recentEvents` | `PING` when the URL is saved, then one line per subscribed event |

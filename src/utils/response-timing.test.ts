@@ -4,6 +4,7 @@ import test from "node:test";
 import { MessageFlags } from "@minesa-org/mini-interaction";
 
 import { linkedChannelCommand } from "../commands/linked-channel.ts";
+import { authorizeCommand } from "../commands/authorize.ts";
 import { linkButton } from "../components/lc_link.ts";
 import { pickChannelSelect } from "../components/lc_pick.ts";
 import { confirmLinkButton } from "../components/lc_confirm.ts";
@@ -66,6 +67,7 @@ function stubInteraction(recorded: Recorded) {
 
 const handlers: [string, { handler: (interaction: never) => Promise<unknown> }][] = [
 	["/linked-channel", linkedChannelCommand as never],
+	["/authorize", authorizeCommand as never],
 	["lc:link", linkButton as never],
 	["lc:pick", pickChannelSelect as never],
 	["lc:confirm", confirmLinkButton as never],

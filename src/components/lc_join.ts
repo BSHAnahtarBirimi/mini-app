@@ -2,8 +2,8 @@ import { MessageFlags } from "@minesa-org/mini-interaction";
 import type { ComponentHandler } from "@minesa-org/mini-interaction";
 
 import { getLobbyRecord } from "../utils/lobby-store.ts";
-import { getFreshUserToken } from "../utils/lobby-tokens.ts";
-import { hasSocialLayerScope } from "../utils/lobby-oauth.ts";
+import { deleteUserToken, getFreshUserToken } from "../utils/lobby-tokens.ts";
+import { hasSocialLayerScope, REVOKED_CONNECTION_HINT } from "../utils/lobby-oauth.ts";
 import {
 	createLobbyChannelInviteForSelf,
 	describeLobbyError,
@@ -90,6 +90,13 @@ export const joinServerButton = {
 						"No invite was created, and the request was **not** retried.",
 					].join("\n"),
 				});
+			}
+			// Discord rejected the stored user token: the account revoked the app.
+			if (error instanceof DiscordRestApiError && error.status === 401) {
+				console.error("[lc:join] stored connection was revoked:", error.body);
+				await deleteUserToken(userId).catch(() => undefined);
+				await recordInteractionError(error, "lc:join:revoked");
+				return interaction.editReply({ content: REVOKED_CONNECTION_HINT });
 			}
 			if (error instanceof DiscordRestApiError) {
 				console.error("[lc:join] invite failed:", error.status, error.body);
