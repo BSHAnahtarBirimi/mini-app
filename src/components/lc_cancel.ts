@@ -1,7 +1,7 @@
 import { MessageFlags } from "@minesa-org/mini-interaction";
 import type { ComponentHandler } from "@minesa-org/mini-interaction";
 
-import { clearPendingLink } from "../utils/linked-channel-state.js";
+import { clearPendingLink } from "../utils/linked-channel-state.ts";
 
 /** `lc:cancel` — clears the pending channel pick without linking. */
 export const cancelLinkButton = {

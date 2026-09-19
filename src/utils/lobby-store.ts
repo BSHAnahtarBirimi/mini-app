@@ -7,7 +7,7 @@
  * user who created it (the member who receives the CanLinkLobby flag).
  */
 
-import { getDb } from "./database.js";
+import { getDb } from "./database.ts";
 
 export const lobbyKeyFor = (guildId: string) => `lc:${guildId}`;
 

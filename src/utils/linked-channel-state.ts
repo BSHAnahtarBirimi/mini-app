@@ -13,7 +13,7 @@
  * path; the database is the source of truth.
  */
 
-import { getDb } from "./database.js";
+import { getDb } from "./database.ts";
 
 export type PendingLink = {
 	channelId: string;

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildBotInviteUrl, deriveProblems } from "./diagnostics.js";
-import type { DiagInput } from "./diagnostics.js";
+import { buildBotInviteUrl, deriveProblems } from "./diagnostics.ts";
+import type { DiagInput } from "./diagnostics.ts";
 
 /** A deployment where everything works — the baseline each test perturbs. */
 const healthy = (): DiagInput => ({

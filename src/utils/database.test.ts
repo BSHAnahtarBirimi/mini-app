@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { hasDatabaseConfig } from "./database.js";
+import { hasDatabaseConfig } from "./database.ts";
 
 /**
  * Regression guard: `MiniDatabase.fromEnv()` throws when `MONGODB_URI` is
@@ -16,9 +16,9 @@ test("linked-channel modules import without MONGODB_URI set", async () => {
 	try {
 		assert.equal(hasDatabaseConfig(), false);
 		const [link, confirm, command] = await Promise.all([
-			import("../components/lc_link.js"),
-			import("../components/lc_confirm.js"),
-			import("../commands/linked-channel.js"),
+			import("../components/lc_link.ts"),
+			import("../components/lc_confirm.ts"),
+			import("../commands/linked-channel.ts"),
 		]);
 		assert.equal(link.linkButton.customId, "lc:link");
 		assert.equal(confirm.confirmLinkButton.customId, "lc:confirm");

@@ -122,6 +122,15 @@ export const myModal = {
 That's it — `MiniInteraction` auto-discovers all files in `src/commands/`,
 `src/components/`, and `src/modals/`. No other registration needed.
 
+> [!IMPORTANT]
+> Handler files are imported **at runtime by Node**, which strips TypeScript
+types itself but does *not* rewrite module specifiers. Import shared code with
+the real extension — `import { getDb } from "../utils/database.ts"` — never
+`"./database.js"`. A `.js` specifier points at a file that does not exist in
+the deployment, and one unresolvable import rejects the whole module load, so
+**every** command and button stops responding while local tooling (tsx) keeps
+working. `src/utils/module-specifiers.test.ts` enforces this for `src/`.
+
 ## Handler API reference
 
 | Handler type | `interaction` methods | Return |

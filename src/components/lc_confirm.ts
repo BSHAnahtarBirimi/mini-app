@@ -1,11 +1,11 @@
 import { MessageFlags } from "@minesa-org/mini-interaction";
 import type { ComponentHandler } from "@minesa-org/mini-interaction";
 
-import { getLobbyRecord } from "../utils/lobby-store.js";
-import { getPendingLink, clearPendingLink } from "../utils/linked-channel-state.js";
-import { getFreshUserToken } from "../utils/lobby-tokens.js";
-import { hasSocialLayerScope } from "../utils/lobby-oauth.js";
-import { linkChannelToLobby, describeLobbyError, DiscordRestApiError } from "../utils/lobby-api.js";
+import { getLobbyRecord } from "../utils/lobby-store.ts";
+import { getPendingLink, clearPendingLink } from "../utils/linked-channel-state.ts";
+import { getFreshUserToken } from "../utils/lobby-tokens.ts";
+import { hasSocialLayerScope } from "../utils/lobby-oauth.ts";
+import { linkChannelToLobby, describeLobbyError, DiscordRestApiError } from "../utils/lobby-api.ts";
 
 /**
  * `lc:confirm` — performs the actual channel link after the warning step.

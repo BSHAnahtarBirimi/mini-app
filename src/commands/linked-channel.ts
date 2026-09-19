@@ -17,11 +17,11 @@ import type { SlashCommandHandler } from "@minesa-org/mini-interaction";
 import {
 	DATABASE_NOT_CONFIGURED_MESSAGE,
 	hasDatabaseConfig,
-} from "../utils/database.js";
-import { getLobbyRecord, setLobbyRecord } from "../utils/lobby-store.js";
-import { createLobby, describeLobbyError, DiscordRestApiError } from "../utils/lobby-api.js";
-import { hasSocialLayerScope, buildSocialSdkOAuthUrl } from "../utils/lobby-oauth.js";
-import { getFreshUserToken } from "../utils/lobby-tokens.js";
+} from "../utils/database.ts";
+import { getLobbyRecord, setLobbyRecord } from "../utils/lobby-store.ts";
+import { createLobby, describeLobbyError, DiscordRestApiError } from "../utils/lobby-api.ts";
+import { hasSocialLayerScope, buildSocialSdkOAuthUrl } from "../utils/lobby-oauth.ts";
+import { getFreshUserToken } from "../utils/lobby-tokens.ts";
 
 /**
  * `/linked-channel` — Linked Channels example flow.
