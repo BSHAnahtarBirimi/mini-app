@@ -7,7 +7,7 @@
  * user who created it (the member who receives the CanLinkLobby flag).
  */
 
-import type { MiniDatabase } from "@minesa-org/mini-interaction";
+import { getDb } from "./database.js";
 
 export const lobbyKeyFor = (guildId: string) => `lc:${guildId}`;
 
@@ -21,11 +21,8 @@ export type LobbyRecord = {
 };
 
 /** Loads the lobby record for a guild, or null if none exists. */
-export async function getLobbyRecord(
-	db: MiniDatabase,
-	guildId: string,
-): Promise<LobbyRecord | null> {
-	const raw = await db.get(lobbyKeyFor(guildId));
+export async function getLobbyRecord(guildId: string): Promise<LobbyRecord | null> {
+	const raw = await getDb().get(lobbyKeyFor(guildId));
 	if (!raw) return null;
 	const lobbyId = typeof raw.lobbyId === "string" ? raw.lobbyId : null;
 	const creatorId = typeof raw.creatorId === "string" ? raw.creatorId : null;
@@ -34,15 +31,11 @@ export async function getLobbyRecord(
 }
 
 /** Creates (or replaces) the guild's lobby record. */
-export function setLobbyRecord(
-	db: MiniDatabase,
-	guildId: string,
-	record: LobbyRecord,
-): Promise<boolean> {
-	return db.set(lobbyKeyFor(guildId), { ...record });
+export function setLobbyRecord(guildId: string, record: LobbyRecord): Promise<boolean> {
+	return getDb().set(lobbyKeyFor(guildId), { ...record });
 }
 
 /** Deletes the guild's lobby record. */
-export function deleteLobbyRecord(db: MiniDatabase, guildId: string): Promise<boolean> {
-	return db.delete(lobbyKeyFor(guildId));
+export function deleteLobbyRecord(guildId: string): Promise<boolean> {
+	return getDb().delete(lobbyKeyFor(guildId));
 }

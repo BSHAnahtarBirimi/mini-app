@@ -1,11 +1,10 @@
 import { MessageFlags } from "@minesa-org/mini-interaction";
 import type { ComponentHandler } from "@minesa-org/mini-interaction";
 
-import { db } from "../utils/database.js";
 import { getLobbyRecord } from "../utils/lobby-store.js";
-import { getStoredUserToken } from "../utils/lobby-tokens.js";
+import { getFreshUserToken } from "../utils/lobby-tokens.js";
 import { hasSocialLayerScope } from "../utils/lobby-oauth.js";
-import { createLobbyChannelInviteForSelf, LobbyApiError } from "../utils/lobby-api.js";
+import { createLobbyChannelInviteForSelf, describeLobbyError, DiscordRestApiError } from "../utils/lobby-api.js";
 
 /**
  * `lc:join` — "Join Discord server" button.
@@ -30,7 +29,7 @@ export const joinServerButton = {
 			});
 		}
 
-		const record = await getLobbyRecord(db, guildId);
+		const record = await getLobbyRecord(guildId);
 		if (!record) {
 			return interaction.reply({
 				content: "❌ No lobby found for this server. Ask an admin to run `/linked-channel` first.",
@@ -38,7 +37,7 @@ export const joinServerButton = {
 			});
 		}
 
-		const storedToken = await getStoredUserToken(db, userId);
+		const storedToken = await getFreshUserToken(userId);
 		if (!storedToken) {
 			return interaction.reply({
 				content:
@@ -68,12 +67,12 @@ export const joinServerButton = {
 				flags: MessageFlags.Ephemeral,
 			});
 		} catch (error) {
-			if (error instanceof LobbyApiError) {
-				console.error("[lc:join] invite failed:", error.status, error.code, error.message);
+			if (error instanceof DiscordRestApiError) {
+				console.error("[lc:join] invite failed:", error.status, error.body);
 				return interaction.reply({
 					content: [
 						"❌ **Could not create an invite.**",
-						`• ${error.message}`,
+						`• ${describeLobbyError(error)}`,
 						"",
 						"The lobby must have a linked channel and you must be one of its members.",
 					].join("\n"),
@@ -82,7 +81,10 @@ export const joinServerButton = {
 			}
 			console.error("[lc:join] unexpected error:", error);
 			return interaction.reply({
-				content: "❌ Unexpected error while creating the invite.",
+				content: [
+					"❌ **Unexpected error while creating the invite.**",
+					`• ${error instanceof Error ? error.message : String(error)}`,
+				].join("\n"),
 				flags: MessageFlags.Ephemeral,
 			});
 		}

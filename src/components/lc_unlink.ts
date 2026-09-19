@@ -1,11 +1,10 @@
 import { MessageFlags } from "@minesa-org/mini-interaction";
 import type { ComponentHandler } from "@minesa-org/mini-interaction";
 
-import { db } from "../utils/database.js";
 import { getLobbyRecord, deleteLobbyRecord } from "../utils/lobby-store.js";
-import { getStoredUserToken } from "../utils/lobby-tokens.js";
+import { getFreshUserToken } from "../utils/lobby-tokens.js";
 import { hasSocialLayerScope } from "../utils/lobby-oauth.js";
-import { unlinkChannelFromLobby, LobbyApiError } from "../utils/lobby-api.js";
+import { unlinkChannelFromLobby, describeLobbyError, DiscordRestApiError } from "../utils/lobby-api.js";
 
 /**
  * `lc:unlink` — removes the channel link from the guild's lobby.
@@ -27,7 +26,7 @@ export const unlinkButton = {
 			});
 		}
 
-		const record = await getLobbyRecord(db, guildId);
+		const record = await getLobbyRecord(guildId);
 		if (!record) {
 			return interaction.reply({
 				content: "ℹ️ No lobby is configured for this server yet.",
@@ -35,7 +34,7 @@ export const unlinkButton = {
 			});
 		}
 
-		const storedToken = await getStoredUserToken(db, userId);
+		const storedToken = await getFreshUserToken(userId);
 		if (!storedToken) {
 			return interaction.reply({
 				content:
@@ -53,19 +52,19 @@ export const unlinkButton = {
 
 		try {
 			await unlinkChannelFromLobby(record.lobbyId, storedToken.accessToken);
-			await deleteLobbyRecord(db, guildId);
+			await deleteLobbyRecord(guildId);
 
 			return interaction.reply({
 				content: "✅ **Unlinked.** The lobby no longer forwards messages to any Discord channel.",
 				flags: MessageFlags.Ephemeral,
 			});
 		} catch (error) {
-			if (error instanceof LobbyApiError) {
-				console.error("[lc:unlink] unlink failed:", error.status, error.code, error.message);
+			if (error instanceof DiscordRestApiError) {
+				console.error("[lc:unlink] unlink failed:", error.status, error.body);
 				return interaction.reply({
 					content: [
 						"❌ **Discord rejected the unlink.**",
-						`• ${error.message}`,
+						`• ${describeLobbyError(error)}`,
 						"",
 						"Common causes: missing `sdk.social_layer` scope, missing CanLinkLobby lobby flag, no link present, or the development cap of **20 calls per 2 hours** being exhausted. The request was **not** retried.",
 					].join("\n"),
@@ -74,7 +73,10 @@ export const unlinkButton = {
 			}
 			console.error("[lc:unlink] unexpected error:", error);
 			return interaction.reply({
-				content: "❌ Unexpected error while unlinking. The request was **not** retried.",
+				content: [
+					"❌ **Unexpected error while unlinking.** The request was **not** retried.",
+					`• ${error instanceof Error ? error.message : String(error)}`,
+				].join("\n"),
 				flags: MessageFlags.Ephemeral,
 			});
 		}
