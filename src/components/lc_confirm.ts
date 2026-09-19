@@ -6,8 +6,14 @@ import type { LobbyRecord } from "../utils/lobby-store.ts";
 import { getPendingLink, clearPendingLink } from "../utils/linked-channel-state.ts";
 import { getFreshUserToken } from "../utils/lobby-tokens.ts";
 import { hasSocialLayerScope } from "../utils/lobby-oauth.ts";
-import { linkChannelToLobby, describeLobbyError, DiscordRestApiError } from "../utils/lobby-api.ts";
+import {
+	linkChannelToLobby,
+	describeLobbyError,
+	DiscordRestApiError,
+	LobbyCallTimeoutError,
+} from "../utils/lobby-api.ts";
 import { isUnknownLobbyError, provisionLobby } from "../utils/lobby-lifecycle.ts";
+import { recordInteractionError } from "../utils/interaction-errors.ts";
 
 /**
  * `lc:confirm` — performs the actual channel link after the warning step.
@@ -82,6 +88,22 @@ export const confirmLinkButton = {
 				].join("\n"),
 			});
 		} catch (error) {
+			// A call the library never let out of the door (or a stalled
+			// connection) is reported, not swallowed: this is the state that used
+			// to leave the admin on "«bot» is thinking…" forever, with nothing
+			// linked and nothing recorded anywhere.
+			if (error instanceof LobbyCallTimeoutError) {
+				console.error("[lc:confirm] link call timed out:", error.message);
+				await recordInteractionError(error, "lc:confirm:link-timeout");
+				return interaction.editReply({
+					content: [
+						"⏳ **Discord did not answer the link request.**",
+						`• ${error.message}`,
+						"",
+						"Nothing was linked and the request was **not** retried. This is usually the development cap of **20 link calls per 2 hours** per application while the app is unapproved — wait before retrying, or check `openid sdk.social_layer` on your connection with `/api/diag`.",
+					].join("\n"),
+				});
+			}
 			if (error instanceof DiscordRestApiError) {
 				console.error("[lc:confirm] link failed:", error.status, error.body);
 				return interaction.editReply({

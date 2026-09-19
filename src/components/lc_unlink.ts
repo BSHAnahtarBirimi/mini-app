@@ -4,8 +4,14 @@ import type { ComponentHandler } from "@minesa-org/mini-interaction";
 import { getLobbyRecord, deleteLobbyRecord } from "../utils/lobby-store.ts";
 import { getFreshUserToken } from "../utils/lobby-tokens.ts";
 import { hasSocialLayerScope } from "../utils/lobby-oauth.ts";
-import { unlinkChannelFromLobby, describeLobbyError, DiscordRestApiError } from "../utils/lobby-api.ts";
+import {
+	unlinkChannelFromLobby,
+	describeLobbyError,
+	DiscordRestApiError,
+	LobbyCallTimeoutError,
+} from "../utils/lobby-api.ts";
 import { isUnknownLobbyError } from "../utils/lobby-lifecycle.ts";
+import { recordInteractionError } from "../utils/interaction-errors.ts";
 
 /**
  * `lc:unlink` — removes the channel link from the guild's lobby.
@@ -66,6 +72,17 @@ export const unlinkButton = {
 					content: [
 						"✅ **Nothing was linked.** The stored lobby no longer exists on Discord's side — lobbies are re-created when needed, so this is expected after they go idle.",
 						"The local record has been cleared.",
+					].join("\n"),
+				});
+			}
+			if (error instanceof LobbyCallTimeoutError) {
+				console.error("[lc:unlink] unlink call timed out:", error.message);
+				await recordInteractionError(error, "lc:unlink:timeout");
+				return interaction.editReply({
+					content: [
+						"⏳ **Discord did not answer the unlink request.**",
+						`• ${error.message}`,
+						"Nothing was changed, and the request was **not** retried.",
 					].join("\n"),
 				});
 			}
