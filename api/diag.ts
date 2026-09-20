@@ -50,6 +50,8 @@ import {
 	loadModulesOf,
 	registrationProblems,
 } from "../src/utils/command-modules.js";
+import { ACTIVITY_SCOPES, activityConfig } from "../src/utils/activity-auth.js";
+import { ACTIVITY_PAGE_PATH, ACTIVITY_SCRIPT_PATH, ACTIVITY_SDK_PATH } from "../src/utils/activity-page.js";
 import { buildSocialSdkOAuthUrl, hasSocialLayerScope } from "../src/utils/lobby-oauth.js";
 import { getStoredUserToken } from "../src/utils/lobby-tokens.js";
 import { listGuildChannelsForMenu } from "../src/utils/lobby-channels.js";
@@ -522,10 +524,28 @@ export default async function handler(req: DiagRequest, res: DiagResponse): Prom
 		selectedChannel,
 		lobby,
 		lobbyState,
+		// The Activity's configuration and the three URLs it is made of. A white
+		// frame inside Discord is normally the URL mapping, not the app — and the
+		// mapping is a prefix → target pair in the Developer Portal pointing at
+		// the deployment root, which is `activity.urlMapping` below.
+		activity: {
+			configured: activityConfig().tokenExchange,
+			scopes: [...ACTIVITY_SCOPES],
+			pagePath: ACTIVITY_PAGE_PATH,
+			scriptPath: ACTIVITY_SCRIPT_PATH,
+			sdkPath: ACTIVITY_SDK_PATH,
+		},
 		links: {
 			botInvite: applicationId ? buildBotInviteUrl(applicationId) : null,
 			// The web app: type a message, it goes to every linked channel.
 			messagePage: hostHeader ? `https://${hostHeader}/message` : null,
+			// The Activity: the same reach, inside Discord. Open it in a browser to
+			// check the page and its assets load; inside Discord it is reached at
+			// the root, which is what the URL mapping below must target.
+			activityPage: hostHeader ? `https://${hostHeader}${ACTIVITY_PAGE_PATH}` : null,
+			activityUrlMapping: hostHeader
+				? { prefix: "/", target: `https://${hostHeader}/` }
+				: null,
 			// The exact URL to paste on the app's Webhooks page. Derived from the
 			// request, so a preview deployment reports its own host.
 			eventsUrl: buildEventsUrl(

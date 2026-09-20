@@ -16,6 +16,11 @@ endpoint file.
 | `api/discord-events.ts` | Webhook Events endpoint (PING, `APPLICATION_DEAUTHORIZED`, …) |
 | `public/message.html` | The web app at `/message`: type a message, it goes to every linked channel |
 | `api/message.ts` | `GET` = where a message would go, `POST` = post it into all of them (bot token) |
+| `src/utils/activity-page.ts` | The Activity shell, rendered by `api/index.ts` (never a blank frame) |
+| `public/activity.js` | The Activity client: SDK handshake, authorization, then the same `/api/message` call |
+| `api/activity.ts` | `GET` = what the Activity needs to start, `POST` = exchange its authorization code |
+| `src/utils/activity-auth.ts` | Activity scopes + the server-side code → token exchange (holds the client secret) |
+| `public/vendor/embedded-app-sdk/` | Vendored Embedded App SDK browser build (`npm run activity-vendor`) |
 | `src/commands/ping.ts` | `/ping` — Components V2 container + section + button |
 | `src/commands/echo.ts` | `/echo` — typed option resolver demo |
 | `src/components/ping_button.ts` | Button → modal with a modal-side select menu |
@@ -397,6 +402,74 @@ deauthorize notice has, and it is why the page posts with the bot token rather
 than a user token — a visitor needs no Discord account, and no lobby has to be
 alive.
 
+### The Activity (`/activity`)
+
+The same "send to every linked channel" experience, as a **Discord Activity** —
+the frame you launch from a server's Activity list, where the Discord client has
+already authenticated the member. `public/activity.js` is the client and
+`api/activity.ts` the server half; `api/index.ts` serves the page, because an
+Activity's URL mapping is a **prefix → target** pair and the one that keeps
+everything reachable is `/` → the deployment root.
+
+| Route | What it is |
+| --- | --- |
+| `/activity` | The page. Open it in a browser and it explains that it is an Activity; inside Discord it runs. |
+| `/activity.js` | The client: SDK handshake, authorization, then `GET`/`POST /api/message`. |
+| `/vendor/embedded-app-sdk/…` | The `@discord/embedded-app-sdk` browser build, vendored (`npm run activity-vendor`) |
+| `GET /api/activity` | `{ clientId, scopes, tokenExchange, missing }` — what the page needs to start |
+| `POST /api/activity` `{ code }` | Exchanges the frame's one-time code for an access token |
+
+How it starts, in order: `GET /api/activity` → `sdk.ready()` (this is also what
+tells Discord the frame loaded) → `sdk.commands.authorize` (Discord's own consent
+modal) → `POST /api/activity` → `sdk.commands.authenticate`. Only then does it
+read and post messages. Three decisions worth knowing:
+
+- **The secret never reaches the browser.** `authorize` returns a one-time
+  `code`; the exchange that turns it into a token needs `DISCORD_CLIENT_SECRET`,
+  so it happens on the server. The Activity asks only for `identify` and
+  `guilds` — **not** `sdk.social_layer`, which is limited access and would fail
+  the whole authorization on an app that has not been accepted into Discord's
+  Social SDK program, even though every linked channel would still work. Delivery
+  does not use the Activity's token at all: it goes through the same
+  `sendToLinkedChannels` path as the web app, with each server's own stored
+  member connection.
+- **It is never a blank frame.** A Discord Activity has no console, no address
+  bar and no error output: a missing page or asset is a white rectangle. So the
+  shell ships a visible starting state plus a fallback that names the fix, every
+  failure writes a readable line into `#status`, `sdk.ready()` is bounded by a
+  timeout (nothing answers `postMessage` outside Discord), and
+  `src/utils/activity-page.test.ts` walks the page's assets *and* the vendored
+  SDK's whole module graph to prove every file they reference exists.
+- **The SDK is served from our own origin**, not a CDN: Discord applies its own
+  Content-Security-Policy to the frame, and depending on a third-party host being
+  allowed has no upside for 460 KB of static ESM. `public/vendor/` is committed,
+  like `vendor/mini-interaction-*.tgz`, so a deploy never depends on the order of
+  install and build steps. `vercel.json` pins its `Content-Type` to
+  `text/javascript` — a module is refused outright if it is served as anything
+  else.
+
+**Enabling it (Developer Portal, one-time):** open your app → **Activities** →
+**URL Mappings**, and add exactly one mapping:
+
+```
+/   →   https://<your-deployment>/        (prefix `/`, target the root)
+```
+
+The root, *not* `/activity`: Discord appends the requested path to the target, so
+mapping the root is what lets the frame reach `/activity.js`, `/vendor/…` and
+`/api/…` at the paths they already have. Two symptoms, and what they mean:
+
+- **A white frame** — the mapping is missing, or points at `/activity`, so the
+  assets and API calls 404. Then `curl https://<your-deployment>/api/diag` →
+  `links.activityUrlMapping` reports the mapping to enter and
+  `activity.configured` says whether the deployment can exchange a code at all.
+- **"This page is a Discord Activity"** inside Discord — the frame reached the
+  page but not as an Activity (no `frame_id`/`instance_id`).
+
+You can verify most of it without Discord: `/activity` must return the page,
+`/activity.js` and `/vendor/embedded-app-sdk/index.mjs` must return JavaScript,
+and `GET /api/activity` must report a `clientId` with `tokenExchange: true`.
+
 ### Package version note
 
 Built on `@minesa-org/mini-interaction` **v0.14.0**, which ships the full Lobby
@@ -535,6 +608,8 @@ names Discord already shows to everyone):
 | `links.botInvite` | Invite URL with `scope=bot+applications.commands` |
 | `links.eventsUrl` | The exact URL to paste on the Developer Portal's Webhooks page |
 | `links.messagePage` | The web app that posts a message into every linked channel |
+| `activity` | Whether the Activity can exchange a code, the scopes it asks for, and its asset paths |
+| `links.activityPage`, `links.activityUrlMapping` | The Activity URL, and the exact Developer Portal URL mapping that serves it |
 
 ```bash
 curl "https://<your-app>/api/diag"

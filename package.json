@@ -7,6 +7,7 @@
 	"scripts": {
 		"build": "tsc --noEmit",
 		"mi-vendor": "node scripts/vendor-mini-interaction.mjs",
+		"activity-vendor": "node scripts/vendor-activity-sdk.mjs",
 		"register": "tsx scripts/register.ts",
 		"register:deploy": "tsx scripts/register-deploy.ts",
 		"typecheck": "tsc --noEmit",
@@ -21,6 +22,7 @@
 	"author": "Minesa",
 	"license": "MIT",
 	"dependencies": {
+		"@discord/embedded-app-sdk": "^2.5.0",
 		"@minesa-org/mini-interaction": "file:vendor/mini-interaction-0.14.0.tgz",
 		"dotenv": "^17.2.3",
 		"mongodb": "^7.0.0"

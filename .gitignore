@@ -1,8 +1,11 @@
 # Dependencies
 node_modules/
 
-# Build output
-dist/
+# Build output (the project's own — anchored to the root, so a vendored
+# dependency that happens to contain a `dist/` directory is still committed;
+# `public/vendor/embedded-app-sdk/lib/uuid/dist/` was silently dropped by the
+# unanchored pattern, which only CI's asset check noticed)
+/dist/
 
 # Logs
 npm-debug.log*
