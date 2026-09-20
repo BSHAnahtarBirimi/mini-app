@@ -7,23 +7,30 @@
  * the Developer Portal that grants one — the loop is the mechanism, and this
  * module is that loop, shared by everything that wants to speak to all links.
  *
- * Targets come from `linkedChannelTargets` (the same definition the
- * `APPLICATION_DEAUTHORIZED` notice uses), which discovers servers from Discord
+ * Targets come from `linkedChannelTargets`, which discovers servers from Discord
  * and reads each one's channel — falling back to the channel remembered on the
  * guild's record, so a lobby Discord has already reaped still gets a target.
  *
- * Two properties matter, for both senders below:
+ * Two senders, because *who is speaking* changes which call is correct:
  *
- * - **The sends run concurrently** (`Promise.allSettled`), so one slow or
- *   unreachable channel cannot eat the whole function timeout, and one failure
- *   cannot mute the channels after it. The caller gets a per-channel outcome and
- *   reports it — that is the answer to "did every channel get it?".
- * - **Who is speaking decides the call.** `broadcastToLinkedChannelsAsBot` posts
- *   with the **bot** token straight into each channel: anyone's message, no
- *   Discord account needed, and no lobby has to be alive. That is what the web
- *   app uses. `broadcastToLinkedChannels` posts *into the lobby* with a user's
- *   OAuth2 token (`openid sdk.social_layer`), which is the call a game makes —
- *   the panel's test button uses that one so it exercises the game's own path.
+ * - {@link sendToLinkedChannels} — the web app. **Lobby first**: post into each
+ *   server's lobby with the OAuth2 token of a member of *that* lobby, which is
+ *   the call a Social SDK game makes and the reason a player's message and a web
+ *   visitor's message look the same in-game. When that is not possible — the
+ *   member never authorized, the scope was not granted, or the lobby went idle —
+ *   the message is posted into the channel by the **bot** instead, and the
+ *   outcome says which path was used. A lobby is a session object and a channel
+ *   is not, so this is the difference between "delivered while a game session is
+ *   live" and "delivered, always".
+ * - {@link broadcastToLinkedChannels} — the panel's test button. Posts into every
+ *   lobby with **your** token, one attempt, results reported. It is deliberately
+ *   not the sender above: pressing it is how an admin checks that *their* own
+ *   connection works, so a fallback would hide exactly what it tests.
+ *
+ * All of them run their sends concurrently (`Promise.allSettled`), so one slow or
+ * unreachable channel cannot eat the whole function timeout, and one failure
+ * cannot mute the channels after it. Each channel's own outcome is returned,
+ * because "did every channel get it?" is the only question that matters here.
  */
 
 import {
@@ -32,6 +39,9 @@ import {
 	sendChannelMessage,
 	sendLobbyMessage,
 } from "./lobby-api.ts";
+import { getLobbyRecord } from "./lobby-store.ts";
+import { getFreshUserToken } from "./lobby-tokens.ts";
+import { hasSocialLayerScope } from "./lobby-oauth.ts";
 import type { LinkedChannelTarget } from "./webhook-events.ts";
 import { linkedChannelTargets } from "./webhook-events.ts";
 
@@ -55,8 +65,31 @@ type TargetOutcome = Attempt & {
 
 export type BroadcastOutcome = TargetOutcome;
 
-/** A bot-token broadcast carries no lobby: the channel is all it needs. */
-export type ChannelBroadcastOutcome = Omit<TargetOutcome, "lobbyId">;
+/** Which call delivered a message. */
+export type Delivery = "lobby" | "channel";
+
+/** One channel's result from {@link sendToLinkedChannels}. */
+export type DeliveryOutcome = {
+	guildId: string;
+	lobbyId: string;
+	channelId: string;
+	ok: boolean;
+	/** Which path delivered it. Absent only when nothing did. */
+	delivery?: Delivery;
+	messageId?: string;
+	/**
+	 * Why the lobby path was not used, when it wasn't — Discord's own reason or
+	 * the missing connection. Present even on success, because "it arrived, but
+	 * via the bot" is the difference between a live game session and none.
+	 */
+	lobbyFallback?: string;
+	/** Discord's reason on the path that failed last (only when `ok` is false). */
+	error?: string;
+	status?: number;
+};
+
+/** The token to post through a server's lobby with, or why there is none. */
+export type MemberToken = { token: string } | { reason: string };
 
 /** Collaborators of {@link broadcastToLinkedChannels}, injectable for tests. */
 export type BroadcastDeps = {
@@ -68,10 +101,13 @@ export type BroadcastDeps = {
 	) => Promise<{ id: string }>;
 };
 
-/** Collaborators of {@link broadcastToLinkedChannelsAsBot}, injectable for tests. */
-export type ChannelBroadcastDeps = {
+/** Collaborators of {@link sendToLinkedChannels}, injectable for tests. */
+export type SenderDeps = {
 	targets: () => Promise<LinkedChannelTarget[]>;
-	send: (channelId: string, content: string) => Promise<{ id: string }>;
+	/** The OAuth2 token of a member of *that server's* lobby, or why not. */
+	memberToken: (guildId: string) => Promise<MemberToken>;
+	sendLobby: (lobbyId: string, content: string, userToken: string) => Promise<{ id: string }>;
+	sendChannel: (channelId: string, content: string) => Promise<{ id: string }>;
 };
 
 const defaultDeps: BroadcastDeps = {
@@ -79,10 +115,93 @@ const defaultDeps: BroadcastDeps = {
 	send: (target, content, userToken) => sendLobbyMessage(target.lobbyId, content, userToken),
 };
 
-const defaultChannelDeps: ChannelBroadcastDeps = {
+/**
+ * The stored connection of the member who linked *this* server's lobby.
+ *
+ * A lobby message is only accepted from a member of that lobby, so the token has
+ * to come from the server's own record (`creatorId`) rather than from whoever is
+ * using the app — one person's token cannot post into another server's lobby.
+ */
+async function lobbyMemberToken(guildId: string): Promise<MemberToken> {
+	const record = await getLobbyRecord(guildId);
+	if (!record) return { reason: "this server has no stored lobby" };
+
+	const token = await getFreshUserToken(record.creatorId);
+	if (!token) {
+		return {
+			reason: "the member who linked this server has no stored Discord connection (`/authorize`)",
+		};
+	}
+	if (!hasSocialLayerScope(token.scope)) {
+		return {
+			reason: `the stored connection is missing \`openid sdk.social_layer\` (scopes: ${token.scope ?? "none"})`,
+		};
+	}
+	return { token: token.accessToken };
+}
+
+const defaultSenderDeps: SenderDeps = {
 	targets: () => linkedChannelTargets(),
-	send: (channelId, content) => sendChannelMessage(channelId, content),
+	memberToken: lobbyMemberToken,
+	sendLobby: (lobbyId, content, userToken) => sendLobbyMessage(lobbyId, content, userToken),
+	sendChannel: (channelId, content) => sendChannelMessage(channelId, content),
 };
+
+/** Posts into one server's lobby, else the bot posts into its channel. */
+async function deliverOne(
+	target: LinkedChannelTarget,
+	content: string,
+	deps: SenderDeps,
+): Promise<DeliveryOutcome> {
+	const base = { guildId: target.guildId, lobbyId: target.lobbyId, channelId: target.channelId };
+
+	// A token lookup that fails (a database blip) falls back rather than
+	// dropping the channel: the message still has somewhere to go.
+	const member = await deps.memberToken(target.guildId).catch(
+		(error): MemberToken => ({ reason: describeLobbyError(error) }),
+	);
+
+	let lobbyFallback: string;
+	if ("token" in member) {
+		try {
+			const message = await deps.sendLobby(target.lobbyId, content, member.token);
+			return { ...base, ok: true, delivery: "lobby", messageId: message.id };
+		} catch (error) {
+			lobbyFallback = describeLobbyError(error);
+		}
+	} else {
+		lobbyFallback = member.reason;
+	}
+
+	try {
+		const message = await deps.sendChannel(target.channelId, content);
+		return { ...base, ok: true, delivery: "channel", messageId: message.id, lobbyFallback };
+	} catch (error) {
+		return {
+			...base,
+			ok: false,
+			lobbyFallback,
+			error: describeLobbyError(error),
+			...(error instanceof DiscordRestApiError ? { status: error.status } : {}),
+		};
+	}
+}
+
+/**
+ * Posts `content` into every linked channel: through each server's lobby when
+ * its member's stored connection allows it, else into the channel as the bot.
+ *
+ * Never throws for a per-channel failure and never retries. A channel where both
+ * paths failed is reported with the reason for each, so nothing is lost silently
+ * and nothing pretends to have been delivered.
+ */
+export async function sendToLinkedChannels(
+	content: string,
+	deps: SenderDeps = defaultSenderDeps,
+): Promise<DeliveryOutcome[]> {
+	const targets = await deps.targets();
+	return await Promise.all(targets.map((target) => deliverOne(target, content, deps)));
+}
 
 /**
  * Runs one send per target, concurrently, and reports each channel's own result.
@@ -115,35 +234,13 @@ async function attemptEvery(
 }
 
 /**
- * Posts `content` into every linked channel this app maintains, as **the bot**.
- *
- * This is the sender for anything that is not a game session: it needs no user
- * token, no lobby membership and no live lobby, so a message typed in a browser
- * (see `api/message.ts`) reaches every linked channel — including servers whose
- * lobby Discord has since reaped. The trade-off is that the message is posted by
- * the bot, and `sendChannelMessage` disables mention parsing so text written by
- * a third party cannot ping a server.
- */
-export async function broadcastToLinkedChannelsAsBot(
-	content: string,
-	deps: ChannelBroadcastDeps = defaultChannelDeps,
-): Promise<ChannelBroadcastOutcome[]> {
-	const outcomes = await attemptEvery(await deps.targets(), (target) =>
-		deps.send(target.channelId, content),
-	);
-	// A bot post does not involve a lobby, so the lobby id is dropped rather than
-	// reported as if it mattered.
-	return outcomes.map(({ lobbyId: _lobbyId, ...rest }) => rest);
-}
-
-/**
  * Posts `content` into every linked channel as the given **user**, through each
  * lobby (`POST /lobbies/{id}/messages`) — the call a Social SDK game makes.
  *
- * Requires the user's OAuth2 token (`openid sdk.social_layer`) and membership of
- * the lobby, so a server where somebody else created the lobby reports a refusal
- * instead of a message. It is still the honest check: a lobby with no linked
- * channel is refused by Discord.
+ * Requires that user's OAuth2 token (`openid sdk.social_layer`) and membership of
+ * every lobby, so a server where somebody else created the lobby reports a
+ * refusal instead of a message. It is still the honest check: a lobby with no
+ * linked channel is refused by Discord.
  */
 export async function broadcastToLinkedChannels(
 	content: string,

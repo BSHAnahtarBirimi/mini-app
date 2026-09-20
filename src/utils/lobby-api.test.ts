@@ -10,6 +10,7 @@ import {
 	describeLobbyError,
 	linkChannelToLobby,
 	sendChannelMessage,
+	sendLobbyMessage,
 	setLobbyCallTimeoutMs,
 	setLobbyFetchImplementation,
 	withTimeout,
@@ -162,6 +163,25 @@ test("a bot channel message disables mention parsing", async () => {
 
 	assert.deepEqual(sent.allowed_mentions, { parse: [] });
 	assert.equal(sent.content, "hi @everyone", "the text itself is not rewritten — only its mentions");
+});
+
+test("a lobby message carries its mentions neutralised", async () => {
+	// This route takes no `allowed_mentions` and the message is posted as the
+	// member's own account, so the content itself has to be unable to ping.
+	let sent: Record<string, unknown> = {};
+	setLobbyFetchImplementation((async (_url: string, init: RequestInit) => {
+		sent = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+		return jsonResponse(200, { id: "1" });
+	}) as never);
+	try {
+		await sendLobbyMessage("1", "hi @everyone <@1>", "user-token");
+	} finally {
+		setLobbyFetchImplementation(undefined);
+	}
+
+	assert.doesNotMatch(String(sent.content), /@everyone/);
+	assert.doesNotMatch(String(sent.content), /<@1>/);
+	assert.equal(sent.allowed_mentions, undefined, "this route has no such field to set");
 });
 
 test("describeLobbyError explains timeouts and Discord's own errors", () => {

@@ -4,10 +4,14 @@
  * `GET`  reports where a message would go: every linked channel this app
  *        maintains, with the channel's name resolved with the bot token so the
  *        page can say `#genel` instead of a snowflake.
- * `POST` takes `{ name, text }` and posts it into **all** of those channels with
- *        the **bot** token (`sendChannelMessage`) — no Discord account, no lobby,
- *        no live lobby to go idle. Discord has no broadcast primitive, so a loop
- *        over the links is the only mechanism that exists (see
+ * `POST` takes `{ name, text }` and posts it into **all** of those channels,
+ *        **through each server's lobby** when that server's member has a stored
+ *        connection with `sdk.social_layer` — the same call a Social SDK game
+ *        makes, so a web message and a player's message arrive the same way —
+ *        and into the channel as the **bot** when it cannot (no connection, no
+ *        scope, or a lobby Discord has already reaped). Every result says which
+ *        path was used. Discord has no broadcast primitive, so a loop over the
+ *        links is the only mechanism that exists (see
  *        `src/utils/lobby-broadcast.ts`).
  *
  * Three deliberate decisions:
@@ -16,9 +20,10 @@
  *   minute). Nothing here is a secret and the app has no user accounts, so the
  *   limit — not authentication — is what keeps one visitor from flooding every
  *   server the app is in.
- * - **Mentions are off.** `sendChannelMessage` sends `allowed_mentions:
- *   { parse: [] }`, so text typed by someone else can never `@everyone` a server
- *   through the bot.
+ * - **Mentions are off on both paths.** The bot path sends `allowed_mentions:
+ *   { parse: [] }`; the lobby path has no such option, so the content is made
+ *   unable to form a mention token (`neutraliseMentions`). A stranger can never
+ *   `@everyone` a server here, on either path.
  * - **Partial delivery is reported as such.** Each channel's own result is
  *   returned, so a server the bot cannot post in shows up as a failure for that
  *   channel instead of being indistinguishable from success.
@@ -27,8 +32,8 @@
 import { hasDatabaseConfig } from "../src/utils/database.js";
 import { describeError } from "../src/utils/interaction-errors.js";
 import { listGuildChannels } from "../src/utils/lobby-api.js";
-import { broadcastToLinkedChannelsAsBot } from "../src/utils/lobby-broadcast.js";
-import type { ChannelBroadcastOutcome } from "../src/utils/lobby-broadcast.js";
+import { sendToLinkedChannels } from "../src/utils/lobby-broadcast.js";
+import type { DeliveryOutcome } from "../src/utils/lobby-broadcast.js";
 import { consumeQuota } from "../src/utils/web-rate-limit.js";
 import type { QuotaResult } from "../src/utils/web-rate-limit.js";
 import { checkWebMessage, MAX_MESSAGE_LENGTH } from "../src/utils/web-message.js";
@@ -62,7 +67,7 @@ export type ChannelDescription = {
 export type MessageDeps = {
 	targets: () => Promise<LinkedChannelTarget[]>;
 	listChannels: (guildId: string) => Promise<{ id: string; name?: string }[]>;
-	broadcast: (content: string) => Promise<ChannelBroadcastOutcome[]>;
+	broadcast: (content: string) => Promise<DeliveryOutcome[]>;
 	quota: (ip: string) => Promise<QuotaResult>;
 };
 
@@ -78,7 +83,7 @@ const defaultDeps: MessageDeps = {
 				? { name: channel.name }
 				: {}),
 		})),
-	broadcast: (content) => broadcastToLinkedChannelsAsBot(content),
+	broadcast: (content) => sendToLinkedChannels(content),
 	quota: (ip) => consumeQuota(ip),
 };
 
@@ -234,7 +239,11 @@ export async function handleMessage(
 		const results = outcomes.map((outcome) => ({
 			channelId: outcome.channelId,
 			ok: outcome.ok,
+			...(outcome.delivery ? { delivery: outcome.delivery } : {}),
 			...(outcome.messageId ? { messageId: outcome.messageId } : {}),
+			// Present even on success: "it arrived, but via the bot" is how an admin
+			// finds out that server's lobby is idle or its member never authorized.
+			...(outcome.lobbyFallback ? { lobbyFallback: outcome.lobbyFallback } : {}),
 			...(outcome.error ? { error: outcome.error } : {}),
 		}));
 

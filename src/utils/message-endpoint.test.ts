@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { handleMessage } from "../../api/message.ts";
 import type { MessageDeps } from "../../api/message.ts";
-import type { ChannelBroadcastOutcome } from "./lobby-broadcast.ts";
+import type { DeliveryOutcome } from "./lobby-broadcast.ts";
 import type { LinkedChannelTarget } from "./webhook-events.ts";
 
 /**
@@ -59,10 +59,12 @@ function recordingDeps(overrides: Partial<MessageDeps> = {}) {
 			// have found, so overriding `targets` alone is enough to test the empty
 			// case.
 			return (await deps.targets()).map(
-				(target): ChannelBroadcastOutcome => ({
+				(target): DeliveryOutcome => ({
 					guildId: target.guildId,
+					lobbyId: target.lobbyId,
 					channelId: target.channelId,
 					ok: true,
+					delivery: "lobby",
 					messageId: `msg-${target.channelId}`,
 				}),
 			);
@@ -143,6 +145,11 @@ test("POST posts the composed message into every linked channel", async () => {
 		["msg-1525905982000070780", "msg-1550970323917340694"],
 		"each channel's own message id is reported",
 	);
+	assert.deepEqual(
+		(json(res).results as { delivery?: string }[]).map((entry) => entry.delivery),
+		["lobby", "lobby"],
+		"and which path delivered it — through the lobby, or the bot as a fallback",
+	);
 });
 
 test("an empty message is refused before anything is posted", async () => {
@@ -193,13 +200,55 @@ test("nothing linked is reported as such, not as a failure", async () => {
 	assert.deepEqual(json(res).results, []);
 });
 
+test("a bot fallback is reported, so an idle lobby is visible rather than silent", async () => {
+	const { deps } = recordingDeps({
+		broadcast: async () => [
+			{
+				guildId: channels[0].guildId,
+				lobbyId: channels[0].lobbyId,
+				channelId: channels[0].channelId,
+				ok: true,
+				delivery: "channel",
+				messageId: "msg-1",
+				lobbyFallback: "404 — Unknown Lobby",
+			},
+		],
+	});
+	const res = await call({ method: "POST", body: { text: "hi" } }, deps);
+
+	assert.equal(res.statusCode, 200);
+	assert.deepEqual(json(res).results, [
+		{
+			channelId: "1525905982000070780",
+			ok: true,
+			delivery: "channel",
+			messageId: "msg-1",
+			lobbyFallback: "404 — Unknown Lobby",
+		},
+	]);
+});
+
 test("one failing channel does not hide the others", async () => {
 	const { deps } = recordingDeps({
 		broadcast: async () =>
 			channels.map((target, index) =>
 				index === 0
-					? { guildId: target.guildId, channelId: target.channelId, ok: false, error: "403 — Missing Permissions", status: 403 }
-					: { guildId: target.guildId, channelId: target.channelId, ok: true, messageId: "msg-2" },
+					? {
+							guildId: target.guildId,
+							lobbyId: target.lobbyId,
+							channelId: target.channelId,
+							ok: false,
+							error: "403 — Missing Permissions",
+							status: 403,
+						}
+					: {
+							guildId: target.guildId,
+							lobbyId: target.lobbyId,
+							channelId: target.channelId,
+							ok: true,
+							delivery: "lobby",
+							messageId: "msg-2",
+						},
 			),
 	});
 	const res = await call({ method: "POST", body: { text: "hi" } }, deps);
@@ -218,6 +267,7 @@ test("every channel failing is an error, with Discord's reason per channel", asy
 		broadcast: async () =>
 			channels.map((target) => ({
 				guildId: target.guildId,
+				lobbyId: target.lobbyId,
 				channelId: target.channelId,
 				ok: false,
 				error: "401 — Unauthorized",

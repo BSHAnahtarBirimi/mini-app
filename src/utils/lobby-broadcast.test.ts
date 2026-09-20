@@ -4,10 +4,10 @@ import test from "node:test";
 import { DiscordRestApiError } from "./lobby-api.ts";
 import {
 	broadcastToLinkedChannels,
-	broadcastToLinkedChannelsAsBot,
 	describeBroadcastOutcomes,
+	sendToLinkedChannels,
 } from "./lobby-broadcast.ts";
-import type { BroadcastDeps, ChannelBroadcastDeps } from "./lobby-broadcast.ts";
+import type { BroadcastDeps, SenderDeps } from "./lobby-broadcast.ts";
 import type { LinkedChannelTarget } from "./webhook-events.ts";
 
 /**
@@ -107,41 +107,151 @@ test("all channels are posted into concurrently, so one slow lobby cannot starve
 	assert.ok(bStartedWhileAWasPending, "the second channel is attempted while the first is still in flight");
 });
 
-test("the bot broadcast reaches every channel and needs no lobby", async () => {
-	const sent: string[] = [];
-	const deps: ChannelBroadcastDeps = {
-		targets: async () => [target("a"), target("b"), target("c")],
-		send: async (channelId) => {
-			if (channelId === "b") {
-				throw new DiscordRestApiError(
-					403,
-					"POST",
-					"/channels/b/messages",
-					'{"message":"Missing Permissions"}',
-				);
-			}
-			sent.push(channelId);
-			return { id: `msg-${channelId}` };
+// ------------------------------------------------- the web app's lobby-first sender
+
+/** Records both paths and lets each one be made to fail per channel. */
+function sender(overrides: Partial<SenderDeps> = {}) {
+	const lobbies: { lobbyId: string; token: string }[] = [];
+	const channels: string[] = [];
+	const tokenAsked: string[] = [];
+	const deps: SenderDeps = {
+		targets: async () => [target("a"), target("b")],
+		memberToken: async (guildId) => {
+			tokenAsked.push(guildId);
+			return { token: `token-${guildId}` };
 		},
+		sendLobby: async (lobbyId, _content, userToken) => {
+			lobbies.push({ lobbyId, token: userToken });
+			return { id: `lobby-msg-${lobbyId}` };
+		},
+		sendChannel: async (channelId) => {
+			channels.push(channelId);
+			return { id: `channel-msg-${channelId}` };
+		},
+		...overrides,
 	};
+	return { deps, lobbies, channels, tokenAsked };
+}
 
-	const outcomes = await broadcastToLinkedChannelsAsBot("anyone's message", deps);
+test("the lobby takes the message when the server's own member is connected", async () => {
+	const { deps, lobbies, channels, tokenAsked } = sender();
+
+	const outcomes = await sendToLinkedChannels("from the web", deps);
 
 	assert.deepEqual(
-		sent,
-		["a", "c"],
-		"a channel the bot cannot post in must not mute the ones after it",
+		lobbies.map((entry) => entry.lobbyId),
+		["lobby-a", "lobby-b"],
+		"each server's lobby is the path a game would use",
 	);
 	assert.deepEqual(
-		outcomes.map((outcome) => outcome.ok),
-		[true, false, true],
+		lobbies.map((entry) => entry.token),
+		["token-g-a", "token-g-b"],
+		"the token belongs to the member of *that* server's lobby, not to one global user",
 	);
-	assert.equal(outcomes[1]?.status, 403);
-	assert.equal(
-		"lobbyId" in (outcomes[0] ?? {}),
-		false,
-		"the bot posts straight into the channel, so a reaped lobby cannot hide it",
+	assert.deepEqual(tokenAsked, ["g-a", "g-b"]);
+	assert.deepEqual(channels, [], "the bot is not used when the lobby worked");
+	assert.deepEqual(
+		outcomes.map((outcome) => [outcome.ok, outcome.delivery, outcome.messageId]),
+		[
+			[true, "lobby", "lobby-msg-lobby-a"],
+			[true, "lobby", "lobby-msg-lobby-b"],
+		],
 	);
+});
+
+test("a member with no usable connection falls back to the bot, and says why", async () => {
+	const { deps, lobbies, channels } = sender({
+		memberToken: async () => ({ reason: "no stored Discord connection (`/authorize`)" }),
+	});
+
+	const outcomes = await sendToLinkedChannels("from the web", deps);
+
+	assert.deepEqual(lobbies, [], "there is no member token to post with");
+	assert.deepEqual(channels, ["a", "b"], "and the message still reaches every channel");
+	assert.deepEqual(
+		outcomes.map((outcome) => [outcome.delivery, outcome.lobbyFallback]),
+		[
+			["channel", "no stored Discord connection (`/authorize`)"],
+			["channel", "no stored Discord connection (`/authorize`)"],
+		],
+		"the admin is told which path was taken and why",
+	);
+});
+
+test("a lobby Discord has reaped falls back to the bot instead of losing the message", async () => {
+	const { deps, channels } = sender({
+		sendLobby: async () => {
+			throw new DiscordRestApiError(404, "POST", "/lobbies/lobby-a/messages", '{"message":"Unknown Lobby"}');
+		},
+	});
+
+	const outcomes = await sendToLinkedChannels("from the web", deps);
+
+	assert.deepEqual(channels, ["a", "b"]);
+	assert.equal(outcomes[0]?.delivery, "channel");
+	assert.match(outcomes[0]?.lobbyFallback ?? "", /Unknown Lobby/);
+	assert.equal(outcomes[0]?.ok, true, "a reaped lobby must not mean an undelivered message");
+});
+
+test("both paths failing is reported with the lobby's reason as well", async () => {
+	const { deps } = sender({
+		sendLobby: async () => {
+			throw new DiscordRestApiError(403, "POST", "/lobbies/a/messages", '{"message":"Missing scope"}');
+		},
+		sendChannel: async () => {
+			throw new DiscordRestApiError(403, "POST", "/channels/a/messages", '{"message":"Missing Permissions"}');
+		},
+	});
+
+	const outcomes = await sendToLinkedChannels("from the web", deps);
+
+	assert.equal(outcomes[0]?.ok, false);
+	assert.equal(outcomes[0]?.status, 403);
+	assert.match(outcomes[0]?.error ?? "", /Missing Permissions/, "the failure that decided it");
+	assert.match(outcomes[0]?.lobbyFallback ?? "", /Missing scope/, "and the earlier one");
+	assert.equal(outcomes[0]?.delivery, undefined, "nothing was delivered, so no path is claimed");
+});
+
+test("a token lookup that throws falls back rather than dropping the channel", async () => {
+	const { deps, channels } = sender({
+		memberToken: async () => {
+			throw new Error("database is unreachable");
+		},
+	});
+
+	const outcomes = await sendToLinkedChannels("from the web", deps);
+
+	assert.deepEqual(channels, ["a", "b"]);
+	assert.match(outcomes[0]?.lobbyFallback ?? "", /database is unreachable/);
+	assert.equal(outcomes[0]?.ok, true);
+});
+
+test("one channel's trouble does not decide the others'", async () => {
+	const { deps, channels } = sender({
+		targets: async () => [target("a"), target("b"), target("c")],
+		sendLobby: async (lobbyId) => {
+			if (lobbyId === "lobby-b") throw new DiscordRestApiError(404, "POST", "/lobbies/b", "{}");
+			return { id: `lobby-msg-${lobbyId}` };
+		},
+		sendChannel: async (channelId) => {
+			if (channelId === "b") throw new DiscordRestApiError(403, "POST", "/channels/b", "{}");
+			channels.push(channelId);
+			return { id: `channel-msg-${channelId}` };
+		},
+	});
+
+	const outcomes = await sendToLinkedChannels("from the web", deps);
+
+	assert.deepEqual(
+		outcomes.map((outcome) => [outcome.channelId, outcome.ok, outcome.delivery]),
+		[
+			["a", true, "lobby"],
+			["b", false, undefined],
+			["c", true, "lobby"],
+		],
+		"the channels after a failing one are still delivered",
+	);
+	assert.match(outcomes[1]?.error ?? "", /403/);
 });
 
 test("nothing linked yet is explained rather than reported as a failure", async () => {
