@@ -78,6 +78,23 @@ export type DiagInput = {
 	 */
 	authorizeCommand?: { ok: boolean; deferred: boolean; replies: number; error: string | null };
 	/**
+	 * Result of running the real `/echo` handler against a stubbed interaction
+	 * (`?command=echo`), with the actual send replaced by a stub.
+	 *
+	 * Everything that decides *whether* the member sees something sensible is
+	 * real — the option parsing, the database check, the stored connection, the
+	 * `sdk.social_layer` check and the reply wording — because a diagnostic must
+	 * not post into every linked channel to prove it could.
+	 */
+	echoCommand?: {
+		ok: boolean;
+		deferred: boolean;
+		replies: number;
+		error: string | null;
+		/** The channels the message *would* have reached, from Discord's own list. */
+		wouldPostTo?: string[];
+	};
+	/**
 	 * Whether the stored lobby still exists on Discord's side (bot-token read).
 	 * Lobbies are session objects that Discord reaps when idle, so a stored id
 	 * is not durable — `404 Unknown Lobby` on the next link is exactly this.
@@ -164,6 +181,15 @@ export function deriveProblems(input: DiagInput): string[] {
 	if (input.authorizeCommand && !input.authorizeCommand.ok) {
 		problems.push(
 			`/authorize could not produce a reply: ${input.authorizeCommand.error ?? "no payload and no error"} — pressing it would leave "«bot» is thinking…".`,
+		);
+	}
+
+	// 4c. The same for `/echo`, which posts **as the member** into every lobby
+	//     (`?command=echo`). Its send is stubbed, so a failure here is a reply
+	//     that would never arrive rather than a message that went out.
+	if (input.echoCommand && !input.echoCommand.ok) {
+		problems.push(
+			`/echo could not produce a reply: ${input.echoCommand.error ?? "no payload and no error"} — pressing it would leave "«bot» is thinking…".`,
 		);
 	}
 

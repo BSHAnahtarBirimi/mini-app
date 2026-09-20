@@ -28,6 +28,7 @@ const status = document.getElementById("status");
 const player = document.getElementById("player");
 const canvas = document.getElementById("game");
 const fallback = document.getElementById("fallback");
+const jumpButton = document.getElementById("jump");
 
 /** The frame is only an Activity when Discord embeds it. */
 const inDiscord = window.parent !== window;
@@ -119,6 +120,29 @@ function showPlayer(name, best) {
 showPlayer(inDiscord ? "…" : "Guest (not in Discord)", readBest(playerId));
 
 if (runner) {
+	// A real button for the jump, because the canvas is a small target on a phone
+	// and a tap that lands on the frame's edge is a jump that never happened. It
+	// calls the same `jump()` the keys and the canvas taps call, so there is one
+	// jump and three ways to ask for it. The button is in the page's own HTML, so
+	// nothing here has to create it.
+	if (jumpButton) {
+		// `pointerdown`, not `click`: it fires the instant the press lands, on
+		// mouse and touch alike, and `preventDefault` keeps the press from moving
+		// focus away from the game's own keys.
+		jumpButton.addEventListener("pointerdown", (event) => {
+			event.preventDefault();
+			runner.jump();
+		});
+		// Keyboard activation: Space on a focused button is already handled by the
+		// game's window keydown listener (which prevents the button's default), so
+		// only Enter needs bridging here — otherwise a mouse press would jump twice.
+		jumpButton.addEventListener("keydown", (event) => {
+			if (event.key !== "Enter") return;
+			event.preventDefault();
+			runner.jump();
+		});
+	}
+
 	// The troubleshooting card is only useful when nothing is on screen.
 	fallback.hidden = true;
 	if (inDiscord) {

@@ -221,6 +221,33 @@ test("a received event clears that problem, including a PING from saving the URL
 	assert.doesNotMatch(problems, /Webhook Events/);
 });
 
+test("a command probe that produced no reply is a problem; a healthy one is not", () => {
+	const failing = joined({
+		...healthy(),
+		echoCommand: { ok: false, deferred: true, replies: 0, error: "MongoNetworkError", wouldPostTo: [] },
+	});
+	assert.match(failing, /\/echo could not produce a reply/);
+	assert.match(failing, /MongoNetworkError/);
+	assert.match(failing, /thinking/, "and says what the member would see instead");
+
+	// `?command=echo` with the send stubbed: a reply is the proof, and the
+	// channels it would have reached are reported separately.
+	const passing = joined({
+		...healthy(),
+		echoCommand: {
+			ok: true,
+			deferred: true,
+			replies: 1,
+			error: null,
+			wouldPostTo: ["1525905982000070780"],
+		},
+	});
+	assert.doesNotMatch(passing, /\/echo/);
+
+	// No probe was requested at all: silence, not a problem.
+	assert.doesNotMatch(joined(healthy()), /\/echo/);
+});
+
 test("the events URL is reported for the request's own host", () => {
 	assert.equal(
 		buildEventsUrl("https://mini-app-bshanahtarbirimi.vercel.app"),

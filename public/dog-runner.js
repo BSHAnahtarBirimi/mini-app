@@ -48,12 +48,24 @@ export const SPEED = { start: 320, max: 620, perPoint: 0.35 };
 /** Pixels travelled per point of score. */
 export const DISTANCE_PER_POINT = 12;
 
-/** The dog's box for a posture, sitting on the ground. */
-export function dogBox(ducking) {
+/**
+ * The dog's box for a posture, resting on the ground.
+ *
+ * `lift` is the dog's height **as the state stores it**: negative means airborne
+ * (`state.dog.y`, where the jump gives a negative velocity). It defaults to 0 so
+ * the pure rules — which ask "what does this obstacle demand?" about a dog on the
+ * ground — read the same as before.
+ *
+ * This parameter is load-bearing, and it was missing: without it the hitbox (and
+ * the drawing) stayed on the ground no matter how high the dog jumped, so a
+ * hydrant — the one obstacle that *must* be jumped — was unavoidable and the jump
+ * looked broken. Anything that asks where the dog is has to pass it.
+ */
+export function dogBox(ducking, lift = 0) {
 	const size = ducking ? DOG.duck : DOG.stand;
 	return {
 		x: DOG.x,
-		y: WORLD.ground - size.height,
+		y: WORLD.ground - size.height + lift,
 		width: size.width,
 		height: size.height,
 	};
@@ -181,7 +193,9 @@ function roundRectPath(ctx, x, y, width, height, radius) {
  * scaled to the box: crouching is simply wider and shorter.
  */
 function drawDog(ctx, dog, ink, night, elapsed) {
-	const box = dogBox(dog.ducking);
+	// The same box the collision uses, including the jump: the dog has to be
+	// drawn where it is, or a cleared hydrant still looks like a hit.
+	const box = dogBox(dog.ducking, dog.y);
 	const sx = box.width / DOG.stand.width;
 	const sy = box.height / DOG.stand.height;
 
@@ -261,7 +275,19 @@ function drawDog(ctx, dog, ink, night, elapsed) {
 	ctx.restore();
 }
 
-/** Draws one obstacle: a fire hydrant on the ground, a frisbee in the air. */
+/**
+ * Draws one obstacle: a fire hydrant on the ground, a frisbee in the air.
+ *
+ * Both shapes are drawn by one call that *always* reaches its `ctx.restore()`.
+ * That is not style: the hydrant used to `return` from inside the `save()`, so
+ * every hydrant on screen leaked one entry of canvas state — and since `restore()`
+ * pops the most recent `save()`, the leak stole the restore that belonged to the
+ * render pass. The world's clipping rectangle (set inside that pass) then stayed
+ * on the context, so the next frame's full-canvas paint was clipped away by the
+ * *previous* frame's clip: the letterbox margin stopped being painted and the page
+ * showed through around the play area. It grew by one entry per hydrant per frame,
+ * forever. One balanced save/restore is the whole fix.
+ */
 function drawObstacle(ctx, obstacle, ink, night) {
 	ctx.save();
 	ctx.lineWidth = 2.4;
@@ -286,21 +312,21 @@ function drawObstacle(ctx, obstacle, ink, night) {
 		ctx.fillStyle = "#f23f43";
 		ctx.fill();
 		ctx.stroke();
-		return;
+	} else {
+		// A frisbee, spinning on its way across.
+		const cx = obstacle.x + obstacle.width / 2;
+		const cy = obstacle.y + obstacle.height / 2;
+		ctx.fillStyle = "#5865f2";
+		ctx.beginPath();
+		ctx.ellipse(cx, cy, obstacle.width / 2, obstacle.height / 2, 0, 0, Math.PI * 2);
+		ctx.fill();
+		ctx.stroke();
+		ctx.fillStyle = "#ffffff";
+		ctx.beginPath();
+		ctx.ellipse(cx, cy - 2, obstacle.width / 2 - 7, obstacle.height / 2 - 7, 0, 0, Math.PI * 2);
+		ctx.fill();
 	}
 
-	// A frisbee, spinning on its way across.
-	const cx = obstacle.x + obstacle.width / 2;
-	const cy = obstacle.y + obstacle.height / 2;
-	ctx.fillStyle = "#5865f2";
-	ctx.beginPath();
-	ctx.ellipse(cx, cy, obstacle.width / 2, obstacle.height / 2, 0, 0, Math.PI * 2);
-	ctx.fill();
-	ctx.stroke();
-	ctx.fillStyle = "#ffffff";
-	ctx.beginPath();
-	ctx.ellipse(cx, cy - 2, obstacle.width / 2 - 7, obstacle.height / 2 - 7, 0, 0, Math.PI * 2);
-	ctx.fill();
 	ctx.restore();
 }
 
@@ -397,7 +423,9 @@ export function startDogRunner(canvas, options = {}) {
 			state.nextSpawn = gapFor(state.speed);
 		}
 
-		const dog = dogBox(state.dog.ducking);
+		// The dog's real box, at the height the jump has reached. Ignoring
+		// `state.dog.y` here is what made every hydrant a guaranteed hit.
+		const dog = dogBox(state.dog.ducking, state.dog.y);
 		for (const obstacle of state.obstacles) {
 			if (overlaps(dog, obstacle)) {
 				state.over = true;
@@ -418,10 +446,24 @@ export function startDogRunner(canvas, options = {}) {
 		const night = Math.floor(state.score / 700) % 2 === 1;
 		const ink = night ? "#ffffff" : "#535353";
 
+		// 1. The whole canvas is painted first, in device pixels. The world is
+		// fitted into the canvas (see `resize()`), and a canvas whose aspect ratio
+		// differs from the world's — a short frame, a phone — would otherwise show
+		// a strip of the page's own colour at the edges.
 		ctx.save();
-		ctx.clearRect(0, 0, width, height);
+		ctx.setTransform(1, 0, 0, 1, 0, 0);
+		ctx.clearRect(0, 0, canvas.width, canvas.height);
 		ctx.fillStyle = night ? "#1e1f22" : "#f7f7f8";
-		ctx.fillRect(0, 0, width, height);
+		ctx.fillRect(0, 0, canvas.width, canvas.height);
+		ctx.restore();
+
+		// 2. Everything the world draws is clipped to the world, so nothing can be
+		// painted outside the play area: a cloud re-entering from the right, a
+		// ground speckle scrolling off the left, a hydrant's nozzle at x-2.
+		ctx.save();
+		ctx.beginPath();
+		ctx.rect(0, 0, width, height);
+		ctx.clip();
 
 		// Clouds, then the ground.
 		ctx.fillStyle = night ? "#3f4147" : "#d9dade";
@@ -577,6 +619,16 @@ export function startDogRunner(canvas, options = {}) {
 		get score() {
 			return Math.floor(state.score);
 		},
+		/**
+		 * Starts the run (or restarts it after a loss), jumping as it does.
+		 *
+		 * Exposed so the Activity can give the game a **real button**: a control
+		 * that is a `<button>` is a large, labelled touch target that works even
+		 * where a tap on the canvas does not land (a phone in Discord, a click that
+		 * hits the frame's edge), and it is the one affordance nobody has to guess
+		 * at. Keyboard and taps stay wired to the same function.
+		 */
+		jump,
 		/** The record this run is measured against. */
 		get best() {
 			return best.value;

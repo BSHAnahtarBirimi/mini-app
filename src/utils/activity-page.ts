@@ -70,6 +70,11 @@ export function activityPage(): string {
 			#stage { position: relative; margin-top: 10px; border-radius: 12px; overflow: hidden; border: 1px solid #1e1f22 }
 			canvas { display: block; width: 100%; height: min(58vh, 320px); touch-action: none; background: #f7f7f8 }
 			.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 10px 0 0; color: #a3a6aa; font-size: 12.5px }
+			.controls { display: flex; align-items: center; gap: 12px; margin: 12px 0 0 }
+			#jump { appearance: none; border: 0; border-radius: 10px; background: #5865f2; color: #fff; font: 600 15px system-ui, -apple-system, sans-serif; padding: 11px 26px; cursor: pointer; touch-action: manipulation }
+			#jump:hover { background: #4752c4 }
+			#jump:active { transform: translateY(1px) }
+			#jump:focus-visible { outline: 2px solid #fff; outline-offset: 2px }
 			kbd { background: #1e1f22; border: 1px solid #3f4147; border-bottom-width: 2px; border-radius: 5px; padding: 1px 5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px }
 			#fallback { margin-top: 12px; padding: 14px; background: #2b2d31; border: 1px solid #1e1f22; border-radius: 10px }
 			code { background: #1e1f22; border-radius: 4px; padding: 1px 5px; font-size: 12px }
@@ -86,6 +91,11 @@ export function activityPage(): string {
 			<p id="status" class="muted">Starting the Activity…</p>
 
 			<div id="stage"><canvas id="game" width="800" height="300"></canvas></div>
+
+			<div class="controls">
+				<button id="jump" type="button">🐶 Jump</button>
+				<span class="muted">Press it, tap the game, or use the space bar — all the same jump.</span>
+			</div>
 
 			<div class="legend">
 				<span><kbd>Space</kbd> / <kbd>↑</kbd> / tap — jump a hydrant</span>

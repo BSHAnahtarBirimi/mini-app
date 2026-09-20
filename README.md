@@ -25,7 +25,8 @@ endpoint file.
 | `src/utils/activity-auth.ts` | Activity scopes + the server-side code → token exchange (holds the client secret) |
 | `public/vendor/embedded-app-sdk/` | Vendored Embedded App SDK browser build (`npm run activity-vendor`) |
 | `src/commands/ping.ts` | `/ping` — Components V2 container + section + button |
-| `src/commands/echo.ts` | `/echo` — typed option resolver demo |
+| `src/commands/echo.ts` | `/echo` — posts your text into the **lobby chat** of every linked channel |
+| `src/utils/echo-command.ts` | Its rules, reply wording and handler (pure + injectable) |
 | `src/components/ping_button.ts` | Button → modal with a modal-side select menu |
 | `src/components/ping_menu.ts` | Select menu component handler |
 | `src/modals/ping_modal.ts` | Modal submit handler |
