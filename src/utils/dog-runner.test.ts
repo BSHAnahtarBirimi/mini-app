@@ -52,7 +52,7 @@ const {
 	FLIGHT_BANDS: Record<string, { height: number; bottom: number }>;
 	SPEED: { start: number; max: number; perPoint: number };
 	WORLD: { width: number; height: number; ground: number };
-	dogBox: (ducking: boolean) => { x: number; y: number; width: number; height: number };
+	dogBox: (ducking: boolean, lift?: number) => { x: number; y: number; width: number; height: number };
 	gapFor: (speed: number, random?: () => number) => number;
 	obstacleBox: (kind: string, x: number) => { kind: string; x: number; y: number; width: number; height: number };
 	overlaps: (a: unknown, b: unknown) => boolean;
@@ -77,6 +77,28 @@ test("the dog stands on the ground, and ducking is a crouch", () => {
 	assert.equal(crouching.y + crouching.height, WORLD.ground, "so does crouching");
 	assert.ok(crouching.height < standing.height, "crouching is shorter — that is the whole dodge");
 	assert.ok(crouching.width > standing.width, "and wider, so it reads as a crouch");
+});
+
+test("the dog's box follows the jump — the hitbox is where the dog is drawn", () => {
+	// The regression this pins: `dogBox` used to ignore the dog's height, so a
+	// jumping dog was still collided with (and drawn) on the ground. Every hydrant
+	// was then unavoidable, which reads as "the jump button does nothing".
+	const ground = dogBox(false);
+	const airborne = dogBox(false, -60);
+
+	assert.equal(airborne.y, ground.y - 60, "a lifted dog's box rises with it");
+	assert.equal(airborne.x, ground.x, "and stays where it started horizontally");
+	assert.equal(airborne.height, ground.height, "without changing shape");
+	assert.equal(dogBox(true, -60).y, dogBox(true).y - 60, "crouching in the air lifts the crouched box");
+
+	const hydrant = obstacleBox("hydrant", DOG.x);
+	const apex = (game.JUMP.velocity * game.JUMP.velocity) / (2 * game.JUMP.gravity);
+	assert.equal(
+		overlaps(dogBox(false, -apex), hydrant),
+		false,
+		"at the top of a jump the dog clears a hydrant it would otherwise hit",
+	);
+	assert.equal(overlaps(dogBox(false, -1), hydrant), true, "while a dog that has barely left the ground is hit");
 });
 
 test("each band demands the action it is named for", () => {

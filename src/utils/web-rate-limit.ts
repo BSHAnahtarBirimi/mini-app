@@ -42,6 +42,19 @@ export const COMMAND_RATE_KEY_PREFIX = "cmd-msg-rate:";
 
 export const commandRateKeyFor = (userId: string) => `${COMMAND_RATE_KEY_PREFIX}${userId}`;
 
+/**
+ * MiniDatabase key prefix: the `/echo` command, keyed per member.
+ *
+ * A third namespace, for the same reason the second one exists: `/echo` posts
+ * into every lobby as the member (`POST /lobbies/{id}/messages`), so it is
+ * limited per person like `/mesaj` — but the two are different actions and
+ * must not spend each other's budget. Sharing a prefix would mean a member who
+ * echoed once could no longer broadcast, which is a limit nobody could explain.
+ */
+export const ECHO_RATE_KEY_PREFIX = "cmd-echo-rate:";
+
+export const echoRateKeyFor = (userId: string) => `${ECHO_RATE_KEY_PREFIX}${userId}`;
+
 /** Drops timestamps that have fallen out of the window. Pure. */
 export function pruneTimestamps(
 	timestamps: number[],
@@ -140,4 +153,18 @@ export async function consumeCommandQuota(
 	now: number = Date.now(),
 ): Promise<QuotaResult> {
 	return await consume(commandRateKeyFor(userId), "command", now);
+}
+
+/**
+ * The same window for a **member** running `/echo`.
+ *
+ * It posts into the game's own message stream once per linked lobby, so it is
+ * limited for the same reason the other two are — and in its own namespace, so
+ * echoing does not consume the member's `/mesaj` budget.
+ */
+export async function consumeEchoQuota(
+	userId: string,
+	now: number = Date.now(),
+): Promise<QuotaResult> {
+	return await consume(echoRateKeyFor(userId), "echo", now);
 }

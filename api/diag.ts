@@ -26,6 +26,13 @@
  *                  have the stored connection really verified with Discord
  *                  (a `401` clears the revoked record, exactly as the command
  *                  does)
+ *   ?command=echo&user=<id>&text=<text>
+ *                  the same for `/echo`, which posts into the lobby chat of
+ *                  every linked channel. The **send is stubbed** — nothing is
+ *                  posted, and no quota is spent; the reply, the stored
+ *                  connection and the `sdk.social_layer` check are real, and
+ *                  `echoCommand.wouldPostTo` lists the channels it would have
+ *                  reached
  *   ?fs=1          report the function's cwd and which runtime paths exist
  */
 
@@ -72,6 +79,8 @@ import { buildAuthorizePayloads } from "../src/utils/authorize-panel.js";
 // emit a compiled copy beside it, so the scan would find the command twice (see
 // `src/utils/authorize-command.ts`).
 import { createAuthorizeHandler } from "../src/utils/authorize-command.js";
+import { createEchoHandler } from "../src/utils/echo-command.js";
+import { hasDatabaseConfig } from "../src/utils/database.js";
 
 /** Minimal structural subset of the Vercel node request/response we use. */
 type DiagRequest = {
@@ -244,6 +253,78 @@ async function probeAuthorizeCommand(userId: string | undefined): Promise<{
 		deferred,
 		replies,
 		error: replies.length > 0 ? null : "the handler produced no reply",
+	};
+}
+
+/**
+ * Runs the real `/echo` command against a stubbed interaction (`?command=echo`).
+ *
+ * Same reasoning as the `/authorize` probe above: Discord signs its
+ * interactions, so a command cannot be triggered over HTTP from outside Discord,
+ * and finding out that `/echo` answers nothing by pressing it in a server is how
+ * a broken command stays broken.
+ *
+ * The one thing that is **not** real is the send. A diagnostic that posts into
+ * every linked channel would be a way to message every server by loading a URL,
+ * so `broadcast` is replaced: it reports which channels the message would have
+ * reached (from Discord's own list, the same source `/mesaj` uses) and sends
+ * nothing. The quota is stubbed as allowed for the same reason — probing must not
+ * spend a member's own budget. Everything else runs for real, including the
+ * `sdk.social_layer` check on the stored connection that decides whether a real
+ * invocation could work at all.
+ */
+async function probeEchoCommand(
+	userId: string | undefined,
+	text: string | undefined,
+): Promise<{
+	ok: boolean;
+	deferred: boolean;
+	replies: unknown[];
+	error: string | null;
+	wouldPostTo: string[];
+}> {
+	let deferred = false;
+	const replies: unknown[] = [];
+	const wouldPostTo: string[] = [];
+
+	const stub = {
+		guild_id: process.env.DISCORD_GUILD_ID ?? "0",
+		...(userId ? { member: { user: { id: userId } } } : {}),
+		options: { getString: () => text ?? "diag echo" },
+		deferReply: async (payload: unknown) => {
+			deferred = true;
+			void payload;
+		},
+		editReply: async (payload: unknown) => {
+			replies.push(JSON.parse(JSON.stringify(payload ?? null)));
+		},
+	};
+
+	try {
+		const handler = createEchoHandler({
+			hasDatabase: () => hasDatabaseConfig(),
+			quota: async () => ({ allowed: true, remaining: 5, retryAfterSeconds: 0, enforced: false }),
+			// Read-only, like the rest of this endpoint: the refreshing helper can
+			// rotate a user's tokens, which a diagnostic must not do.
+			getToken: (id) => getStoredUserToken(id),
+			clearToken: async () => {},
+			broadcast: async () => {
+				const targets = await linkedChannelTargets();
+				for (const target of targets) wouldPostTo.push(target.channelId);
+				return targets.map((target) => ({ ...target, ok: true, messageId: "diag-probe" }));
+			},
+		}) as unknown as (interaction: unknown) => Promise<unknown>;
+		await handler(stub);
+	} catch (error) {
+		return { ok: false, deferred, replies, error: describeError(error), wouldPostTo };
+	}
+
+	return {
+		ok: deferred && replies.length > 0,
+		deferred,
+		replies,
+		error: replies.length > 0 ? null : "the handler produced no reply",
+		wouldPostTo,
 	};
 }
 
@@ -456,9 +537,12 @@ export default async function handler(req: DiagRequest, res: DiagResponse): Prom
 	// hundreds of Discord calls.
 	const linkedChannels = await probe(() => linkedChannelTargets());
 	const payloads = buildPayloadsProbe();
+	const requestedCommand = url.searchParams.get("command");
 	const authorizeCommand =
-		url.searchParams.get("command") === "authorize"
-			? await probeAuthorizeCommand(userId ?? undefined)
+		requestedCommand === "authorize" ? await probeAuthorizeCommand(userId ?? undefined) : undefined;
+	const echoCommand =
+		requestedCommand === "echo"
+			? await probeEchoCommand(userId ?? undefined, url.searchParams.get("text") ?? undefined)
 			: undefined;
 
 	const problems = deriveProblems({
@@ -470,6 +554,16 @@ export default async function handler(req: DiagRequest, res: DiagResponse): Prom
 						deferred: authorizeCommand.deferred,
 						replies: authorizeCommand.replies.length,
 						error: authorizeCommand.error,
+					},
+				}
+			: {}),
+		...(echoCommand
+			? {
+					echoCommand: {
+						ok: echoCommand.ok,
+						deferred: echoCommand.deferred,
+						replies: echoCommand.replies.length,
+						error: echoCommand.error,
 					},
 				}
 			: {}),
@@ -520,6 +614,7 @@ export default async function handler(req: DiagRequest, res: DiagResponse): Prom
 		linkedChannels,
 		payloads,
 		...(authorizeCommand ? { authorizeCommand } : {}),
+		...(echoCommand ? { echoCommand } : {}),
 		channels,
 		selectedChannel,
 		lobby,

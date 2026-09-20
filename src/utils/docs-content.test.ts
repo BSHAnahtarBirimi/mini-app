@@ -9,7 +9,7 @@ import { DIAG_ENV_VARS } from "./diagnostics.ts";
 import { WEBHOOK_EVENT_LOG_KEY } from "./event-log.ts";
 import { INTERACTION_ERRORS_KEY } from "./interaction-errors.ts";
 import { LOBBY_GUILD_INDEX_KEY, lobbyKeyFor } from "./lobby-store.ts";
-import { commandRateKeyFor, rateKeyFor } from "./web-rate-limit.ts";
+import { commandRateKeyFor, echoRateKeyFor, rateKeyFor } from "./web-rate-limit.ts";
 
 /**
  * A documentation site that quietly stops covering the app is worse than none.
@@ -145,6 +145,7 @@ test("the storage keys are documented, derived from the code that builds them", 
 		LOBBY_GUILD_INDEX_KEY,
 		rateKeyFor("IP").replace("IP", ""),
 		commandRateKeyFor("USER_ID").replace("USER_ID", ""),
+		echoRateKeyFor("USER_ID").replace("USER_ID", ""),
 		WEBHOOK_EVENT_LOG_KEY,
 		INTERACTION_ERRORS_KEY,
 		"lc-pending:", // built by `pendingKey()` in linked-channel-state.ts

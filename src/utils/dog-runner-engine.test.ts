@@ -23,7 +23,13 @@ const { startDogRunner, WORLD, DOG } = (await import(gameUrl)) as {
 	startDogRunner: (
 		canvas: unknown,
 		options?: { best?: number; onBest?: (value: number) => void },
-	) => { stop(): void; setBest(value: number): void; readonly score: number; readonly best: number };
+	) => {
+		stop(): void;
+		jump(): void;
+		setBest(value: number): void;
+		readonly score: number;
+		readonly best: number;
+	};
 	WORLD: { width: number; height: number; ground: number };
 	DOG: { x: number };
 };
@@ -62,32 +68,46 @@ function fakeEventTarget(): FakeTarget {
 	};
 }
 
-/** A canvas that records what was drawn, plus its own event target. */
+/**
+ * A canvas that records what was drawn, plus its own event target.
+ *
+ * Every 2D call is recorded **with its arguments**, not just counted: the two
+ * failures that make the frame look broken rather than throw — a save that is
+ * never balanced by a restore, and a paint that happens outside the world's
+ * clipping rectangle — are only visible in the sequence of calls.
+ */
 function fakeCanvas() {
 	const calls: string[] = [];
-	const noop = () => {
-		calls.push("call");
+	const ops: { op: string; args: unknown[] }[] = [];
+	const record = (op: string) => {
+		return (...args: unknown[]) => {
+			calls.push(op);
+			ops.push({ op, args });
+		};
 	};
 	const ctx = {
-		save: noop,
-		restore: noop,
-		clearRect: noop,
-		fillRect: noop,
-		fillText(raw: unknown, x: number) {
+		save: record("save"),
+		restore: record("restore"),
+		clearRect: record("clearRect"),
+		fillRect: record("fillRect"),
+		fillText(raw: unknown, x: number, y: number) {
 			calls.push(`text:${String(raw)}@${x}`);
+			ops.push({ op: "fillText", args: [raw, x, y] });
 		},
-		beginPath: noop,
-		moveTo: noop,
-		lineTo: noop,
-		arcTo: noop,
-		arc: noop,
-		ellipse: noop,
-		closePath: noop,
-		fill: noop,
-		stroke: noop,
-		translate: noop,
-		scale: noop,
-		setTransform: noop,
+		beginPath: record("beginPath"),
+		moveTo: record("moveTo"),
+		lineTo: record("lineTo"),
+		arcTo: record("arcTo"),
+		arc: record("arc"),
+		ellipse: record("ellipse"),
+		closePath: record("closePath"),
+		fill: record("fill"),
+		stroke: record("stroke"),
+		translate: record("translate"),
+		scale: record("scale"),
+		setTransform: record("setTransform"),
+		rect: record("rect"),
+		clip: record("clip"),
 		fillStyle: "",
 		strokeStyle: "",
 		lineWidth: 1,
@@ -107,6 +127,7 @@ function fakeCanvas() {
 			removeEventListener: target.removeEventListener,
 		},
 		calls,
+		ops,
 		target,
 	};
 }
@@ -168,7 +189,7 @@ function installBrowserGlobals() {
 test("the game runs headless: frames render, a collision ends the run, space restarts it", () => {
 	const driver = installBrowserGlobals();
 	try {
-		const { canvas, calls, target: canvasTarget } = fakeCanvas();
+		const { canvas, calls, ops, target: canvasTarget } = fakeCanvas();
 		let bestReported = 0;
 		const runner = startDogRunner(canvas, { best: 0, onBest: (value) => (bestReported = value) });
 
@@ -207,8 +228,12 @@ test("the game runs headless: frames render, a collision ends the run, space res
 		assert.ok(runner.score > 0, "a restart runs again");
 		assert.ok(runner.best >= bestReported, "the record survives the restart");
 
-		// A tap is a jump too, which is how the game is played on a phone.
+		// A tap is a jump too, which is how the game is played on a phone — and so is
+		// the Activity's own button, which calls the same thing the tap does.
 		canvasTarget.fire("pointerdown");
+		for (let i = 0; i < 10; i += 1) driver.frame();
+		assert.equal(typeof runner.jump, "function", "the game exposes the jump its button needs");
+		runner.jump();
 		for (let i = 0; i < 10; i += 1) driver.frame();
 
 		// Ducking changes the dog's box mid-run; nothing may throw while it is held.
@@ -220,6 +245,48 @@ test("the game runs headless: frames render, a collision ends the run, space res
 		driver.windowTarget.fire("blur");
 		driver.frame();
 		driver.windowTarget.fire("focus");
+
+		// The two ways the frame goes wrong *without* throwing, both of which are
+		// checked on the real sequence of calls.
+		//
+		// 1. Nothing may paint outside the play area. The canvas is fitted to the
+		//    world with letterboxing, so the render paints the whole canvas in
+		//    device pixels first and then draws the world inside a clip of it.
+		const worldClip = ops.findIndex(
+			(op) =>
+				op.op === "rect" &&
+				op.args[0] === 0 &&
+				op.args[1] === 0 &&
+				op.args[2] === WORLD.width &&
+				op.args[3] === WORLD.height,
+		);
+		assert.ok(worldClip >= 0, "the world is clipped to its own rectangle");
+		assert.equal(ops[worldClip + 1]?.op, "clip", "and the clip is applied, not just described");
+
+		const wholeCanvas = ops.filter(
+			(op) => op.op === "fillRect" && op.args[2] === canvas.width && op.args[3] === canvas.height,
+		);
+		assert.ok(
+			wholeCanvas.length > 5,
+			`every frame paints the whole canvas in device pixels, letterbox included — ${wholeCanvas.length} did`,
+		);
+		assert.ok(
+			ops.indexOf(wholeCanvas[0]) < worldClip,
+			"and it does so before the world's clip is set, so the margins are never clipped away",
+		);
+
+		// 2. Save and restore must balance. A `save()` that is never restored leaks
+		//    one entry of canvas state per call, and — because `restore()` pops the
+		//    most recent one — the *next* frame's paint ends up clipped by the
+		//    previous frame's clip, so the letterbox margin shows the page through.
+		//    That is what "things get out of the canvas" looked like.
+		const saves = ops.filter((op) => op.op === "save").length;
+		const restores = ops.filter((op) => op.op === "restore").length;
+		assert.equal(
+			saves,
+			restores,
+			`the canvas state stack is unbalanced: ${saves} save() vs ${restores} restore()`,
+		);
 
 		runner.stop();
 		assert.equal(driver.windowTarget.count(), 0, "teardown detaches every window listener");

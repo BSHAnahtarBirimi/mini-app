@@ -213,8 +213,9 @@ const COMMANDS: DocsSection = {
 		},
 		{
 			id: "commands-mesaj",
-			title: "/mesaj",
-			blurb: "One message, every linked channel, from inside Discord.",
+			title: "/mesaj · /echo",
+			blurb:
+				"One message, every linked channel, from inside Discord — as the app's bot, or as you through the game's lobby. The group also carries the `/echo` module and the rate-limit key it uses.",
 			entries: [
 				{
 					name: "/mesaj",
@@ -232,6 +233,73 @@ const COMMANDS: DocsSection = {
 					example: "/mesaj metin:Bu akşam 21:00'de oyun var!",
 					tags: ["broadcast", "message", "every channel", "lobby"],
 				},
+				{
+					name: "/echo",
+					kind: "Command",
+					signature: "/echo text:<text>",
+					summary:
+						"Posts your text into the **lobby chat** of every linked channel — `POST /lobbies/{id}/messages`, the message stream a game session reads — which Discord then mirrors into that lobby's linked channel.",
+					details: [
+						"Not the same thing as `/mesaj`. `/echo` is posted **as you**, with your own OAuth2 token, because a lobby message is only accepted from a member of that lobby — that is what makes a game see it. `/mesaj` always arrives, but when a lobby refuses it and the bot posts instead, no game ever reads it.",
+						"It needs your stored connection with `openid sdk.social_layer` (`/authorize`). Without that scope Discord answers a user-token route with `403`, which reads like a permission problem in the server rather than a missing consent — so the command reads the stored scope **first** and answers **Reconnect** instead of calling.",
+						"Rate-limited per member at 5 per minute (`cmd-echo-rate:<userId>`), in its own namespace so echoing does not spend the `/mesaj` budget.",
+						"Limit: 2000 characters — Discord's own message limit.",
+						"A refusal is shown per channel with Discord's own reason and **never retried**: while the application is unapproved, channel linking is capped at 20 calls per 2 hours per application, so a retry loop is how one failure becomes an outage.",
+					],
+					where: "src/commands/echo.ts · src/utils/echo-command.ts",
+					example: "/echo text:Bu akşam 21:00'de oyun var!",
+					tags: ["lobby", "game chat", "message", "every channel"],
+				},
+				{
+					name: "checkEchoText",
+					kind: "Function",
+					signature: "checkEchoText(raw: unknown): { ok: true; text } | { ok: false; error }",
+					summary:
+						"Validates `/echo`'s `text` option — trimmed, non-empty, at most 2000 characters — and says how long the text was instead of truncating it in silence.",
+					where: "src/utils/echo-command.ts",
+				},
+				{
+					name: "createEchoHandler",
+					kind: "Function",
+					signature: "createEchoHandler(deps?: EchoDeps): SlashCommandHandler",
+					summary:
+						"The `/echo` handler, with every collaborator injectable so each branch is tested without Discord: it defers first (ephemerally), reads the member's stored scope, posts **once**, and replies either way.",
+					details: [
+						"It refuses **before** calling Discord when the stored connection has no `sdk.social_layer`, because the `403` that route returns reads like a server permission problem — and because a retry would spend the application's 20-calls-per-2-hours channel-linking budget.",
+						"The rules live in this module, not in `src/commands/echo.ts`: the framework discovers commands by importing that directory, so a command file imported from elsewhere is emitted twice and Discord rejects the duplicate-name `PUT`.",
+					],
+					example: "src/utils/echo-command.test.ts",
+					where: "src/utils/echo-command.ts",
+				},
+				{
+					name: "describeEchoReply",
+					kind: "Function",
+					signature: "describeEchoReply(outcomes: BroadcastOutcome[]): string",
+					summary:
+						"The reply: what was posted, that it went into the **lobby chat** a game reads, and Discord's own reason for each channel that refused.",
+					where: "src/utils/echo-command.ts",
+				},
+				{
+					name: "describeEchoQuotaRefusal",
+					kind: "Function",
+					signature: "describeEchoQuotaRefusal(quota: QuotaResult): string",
+					summary: "How long the member must wait before echoing again.",
+					where: "src/utils/echo-command.ts",
+				},
+				{
+					name: "ECHO_SCOPE_NOTE",
+					kind: "Constant",
+					summary:
+						"The one line about `sdk.social_layer` being **limited access**: Discord grants it only after approving a Social SDK access request, so a reconnect can succeed and still not include it.",
+					where: "src/utils/echo-command.ts",
+				},
+				{
+					name: "cmd-echo-rate:${userId}",
+					kind: "Key",
+					summary:
+						"The `/echo` sliding window: 5 per minute per member (`consumeEchoQuota`), in a namespace of its own so echoing never spends the member's `/mesaj` budget.",
+					where: "src/utils/web-rate-limit.ts",
+				},
 			],
 		},
 		{
@@ -239,16 +307,6 @@ const COMMANDS: DocsSection = {
 			title: "Template commands",
 			blurb: "The commands this app started with. They are kept working as living examples.",
 			entries: [
-				{
-					name: "/echo",
-					kind: "Command",
-					signature: "/echo text:<text>",
-					summary: "Replies with the text you gave, demonstrating the typed option resolver.",
-					details: [
-						"`interaction.options.getString(\"text\", true)` — the second argument marks the option required, so the handler never sees it missing.",
-					],
-					where: "src/commands/echo.ts",
-				},
 				{
 					name: "/slow",
 					kind: "Command",
@@ -527,12 +585,12 @@ const ENDPOINTS: DocsSection = {
 						"Read-only JSON diagnostics — the endpoint that answers the questions Vercel's dashboard would otherwise be needed for. Never returns a secret: only *whether* an environment variable is set.",
 					details: [
 						"`problems` — why commands are missing or linking cannot work, in order.",
-						"`?guild=<id>` also reads that server's commands, lobby record and channel menu with privacy verdicts; `?channel=<id>` highlights one of them; `?user=<id>` reports whether that user has a stored connection and which scopes it granted; `?command=authorize` runs the real `/authorize` command against a stub interaction and returns the reply it would send; `?fs=1` reports the function's `cwd` and which runtime paths exist.",
+						"`?guild=<id>` also reads that server's commands, lobby record and channel menu with privacy verdicts; `?channel=<id>` highlights one of them; `?user=<id>` reports whether that user has a stored connection and which scopes it granted; `?command=authorize` runs the real `/authorize` command against a stub interaction and returns the reply it would send; `?command=echo` does the same for `/echo` with the **send stubbed** (nothing is posted, no quota is spent, `wouldPostTo` lists the channels it would reach); `?fs=1` reports the function's `cwd` and which runtime paths exist.",
 						"`lobbyState` says whether the stored lobby still exists on Discord's side; `linkedChannels` lists exactly what a deauthorization notice would reach; `recentEvents` and `recentFailures` are the last webhook deliveries and handler failures.",
 						"`links.botInvite` is the invite URL to install the bot with `scope=bot+applications.commands` — the linked-roles consent flow does not add the bot to a server.",
 					],
 					where: "api/diag.ts · src/utils/diagnostics.ts",
-					example: "curl \"https://<your-app>/api/diag\"\ncurl \"https://<your-app>/api/diag?guild=<GUILD_ID>\"\ncurl \"https://<your-app>/api/diag?command=authorize&user=<USER_ID>\"",
+					example: "curl \"https://<your-app>/api/diag\"\ncurl \"https://<your-app>/api/diag?guild=<GUILD_ID>\"\ncurl \"https://<your-app>/api/diag?command=authorize&user=<USER_ID>\"\ncurl \"https://<your-app>/api/diag?command=echo&user=<USER_ID>\"",
 					tags: ["diagnostics", "health", "debug"],
 				},
 				{
