@@ -31,6 +31,22 @@
  *   scope it back to the user's own links, filter `considered` targets by
  *   `record.creatorId === user.id` in `notifyLinkedChannelsOfDeauthorization`.
  *
+ * Two properties make "every linked channel" actually true rather than
+ * usually true, both learned from a report of "it only reached one channel":
+ *
+ * - **A reaped lobby must not hide a server.** The channel of a target is
+ *   normally read live from the lobby, but lobbies are sessions Discord reaps
+ *   when idle, and a failed read used to drop the guild from the broadcast in
+ *   silence. The channel remembered on the guild's record is the fallback, so
+ *   the notice needs no live lobby at all. Posting itself is a bot-token
+ *   `POST /channels/{id}/messages` — the lobby is not involved.
+ * - **One unreachable channel must not mute the rest.** The sends run
+ *   concurrently under `Promise.allSettled`: a channel the bot cannot post in
+ *   is recorded as a failure and reported (`/api/diag` → `recentEvents`), and
+ *   the delivery is still acknowledged, because retrying would re-notify the
+ *   channels that already succeeded. Discord has no broadcast primitive — a
+ *   loop over the linked channels is the only way to reach all of them.
+ *
  * Every received event is also logged (`src/utils/event-log.ts`) and reported by
  * `GET /api/diag`, which is how the endpoint and a subscribed event can be
  * verified without dashboard access.
@@ -52,7 +68,7 @@ import {
 	listBotGuilds,
 	sendChannelMessage,
 } from "./lobby-api.ts";
-import { getLobbyRecord, listLobbyGuilds, unionGuilds } from "./lobby-store.ts";
+import { getLobbyRecord, listLobbyGuilds, setLobbyChannel, unionGuilds } from "./lobby-store.ts";
 import { deleteUserToken } from "./lobby-tokens.ts";
 
 // ------------------------------------------------------------------ summaries
@@ -147,18 +163,35 @@ export function deauthorizationMessage(user: { id: string; username?: string }):
 	].join("\n");
 }
 
+/** A channel the app maintains a link to, with the lobby that produced it. */
+export type LinkedChannelTarget = {
+	guildId: string;
+	/** The lobby the channel was linked from — it may already have been reaped. */
+	lobbyId: string;
+	channelId: string;
+};
+
 /** Collaborators of {@link notifyLinkedChannelsOfDeauthorization}, injectable for tests. */
 export type DeauthorizeDeps = {
 	listGuilds: () => Promise<string[]>;
-	getLobbyRecord: (guildId: string) => Promise<{ lobbyId: string; creatorId: string } | null>;
+	getLobbyRecord: (
+		guildId: string,
+	) => Promise<{ lobbyId: string; creatorId: string; channelId?: string } | null>;
 	readLinkedChannelId: (lobbyId: string) => Promise<string | null>;
+	/**
+	 * Stores the channel a guild's lobby links to, so a later notice does not
+	 * need a live lobby read (see `lobby-store.ts` → `setLobbyChannel`).
+	 */
+	rememberChannel: (guildId: string, channelId: string) => Promise<void>;
 	sendChannelMessage: (channelId: string, content: string) => Promise<unknown>;
 	deleteUserToken: (userId: string) => Promise<void>;
 };
 
 export type DeauthorizeOutcome = {
-	/** `guildId → channelId` for the links that were notified. */
+	/** The links the notice reached. */
 	notified: { guildId: string; channelId: string }[];
+	/** Links the notice could not reach, with Discord's reason for each. */
+	failed: { guildId: string; channelId: string; error: string }[];
 	/** Guilds with a lobby but no linked channel — nothing to post into. */
 	withoutLinkedChannel: string[];
 	/** Guilds examined (the bot's servers ∪ the stored index). */
@@ -194,9 +227,36 @@ const defaultDeps: DeauthorizeDeps = {
 	listGuilds: candidateGuilds,
 	getLobbyRecord,
 	readLinkedChannelId: async (lobbyId) => linkedChannelIdOf(await getLobby(lobbyId)),
+	rememberChannel: setLobbyChannel,
 	sendChannelMessage: (channelId, content) => sendChannelMessage(channelId, content),
 	deleteUserToken,
 };
+
+/**
+ * One line naming what a deauthorization reached, and what it could not.
+ *
+ * Channels are reported as mentions because that is what makes the log
+ * answerable: "only one channel got it" is checkable here without asking anyone
+ * to look in Discord. Pure, so the wording is unit tested.
+ */
+export function describeDeauthorizationOutcome(outcome: DeauthorizeOutcome): string {
+	return [
+		outcome.connectionDeleted ? "connection dropped" : "",
+		outcome.notified.length > 0
+			? `notified ${outcome.notified.map((target) => `<#${target.channelId}>`).join(", ")}`
+			: "nothing to notify",
+		outcome.failed.length > 0
+			? `failed ${outcome.failed
+					.map((target) => `<#${target.channelId}> (${target.error})`)
+					.join(", ")}`
+			: "",
+		outcome.withoutLinkedChannel.length > 0
+			? `${outcome.withoutLinkedChannel.length} without a linked channel`
+			: "",
+	]
+		.filter(Boolean)
+		.join("; ");
+}
 
 /**
  * Handles `APPLICATION_DEAUTHORIZED` for one user.
@@ -217,14 +277,30 @@ export async function notifyLinkedChannelsOfDeauthorization(
 	await deps.deleteUserToken(user.id);
 
 	const collected = await collectLinkedChannels(user.id, deps);
+	const content = deauthorizationMessage(user);
+
+	// Concurrently, and each outcome on its own: a channel the bot cannot post
+	// in must not mute the ones after it. `allSettled` also keeps the whole
+	// broadcast inside one function timeout, however many servers there are.
+	const settled = await Promise.allSettled(
+		collected.targets.map((target) => deps.sendChannelMessage(target.channelId, content)),
+	);
+
 	const notified: { guildId: string; channelId: string }[] = [];
-	for (const target of collected.targets) {
-		await deps.sendChannelMessage(target.channelId, deauthorizationMessage(user));
-		notified.push(target);
-	}
+	const failed: { guildId: string; channelId: string; error: string }[] = [];
+	settled.forEach((result, index) => {
+		const target = collected.targets[index];
+		if (result.status === "fulfilled") {
+			notified.push(target);
+			return;
+		}
+		console.error(`[webhook-events] could not notify <#${target.channelId}>:`, result.reason);
+		failed.push({ ...target, error: describeError(result.reason) });
+	});
 
 	return {
 		notified,
+		failed,
 		withoutLinkedChannel: collected.withoutLinkedChannel,
 		considered: collected.considered,
 		ownedByUser: collected.ownedByUser,
@@ -243,7 +319,7 @@ export const LINKED_CHANNEL_TARGET_LIMIT = 10;
 export async function linkedChannelTargets(
 	deps: DeauthorizeDeps = defaultDeps,
 	maxGuilds: number = LINKED_CHANNEL_TARGET_LIMIT,
-): Promise<{ guildId: string; channelId: string }[]> {
+): Promise<LinkedChannelTarget[]> {
 	// No user id: nothing here is filtered by who linked what.
 	return (await collectLinkedChannels("", deps, maxGuilds)).targets;
 }
@@ -259,12 +335,12 @@ async function collectLinkedChannels(
 	deps: DeauthorizeDeps,
 	maxGuilds: number = Number.POSITIVE_INFINITY,
 ): Promise<{
-	targets: { guildId: string; channelId: string }[];
+	targets: LinkedChannelTarget[];
 	withoutLinkedChannel: string[];
 	considered: string[];
 	ownedByUser: string[];
 }> {
-	const targets: { guildId: string; channelId: string }[] = [];
+	const targets: LinkedChannelTarget[] = [];
 	const withoutLinkedChannel: string[] = [];
 	const considered: string[] = [];
 	const ownedByUser: string[] = [];
@@ -276,13 +352,25 @@ async function collectLinkedChannels(
 		if (!record) continue;
 		if (userId !== "" && record.creatorId === userId) ownedByUser.push(guildId);
 
-		const channelId = await deps.readLinkedChannelId(record.lobbyId).catch(() => null);
+		// Discord's live answer wins when it has one, but it is not required: a
+		// lobby Discord has reaped (`404 Unknown Lobby`) must not drop this
+		// guild from the broadcast — the channel outlives the lobby.
+		const live = await deps.readLinkedChannelId(record.lobbyId).catch(() => null);
+		const channelId = live ?? record.channelId ?? null;
 		if (!channelId) {
 			withoutLinkedChannel.push(guildId);
 			continue;
 		}
 
-		targets.push({ guildId, channelId });
+		// Learn the channel while we can, so the next notice does not depend on
+		// a lobby read either. Never fatal for the notification already in hand.
+		if (live && live !== record.channelId) {
+			await deps.rememberChannel(guildId, live).catch((error) =>
+				console.error("[webhook-events] could not remember the linked channel:", error),
+			);
+		}
+
+		targets.push({ guildId, lobbyId: record.lobbyId, channelId });
 	}
 
 	return { targets, withoutLinkedChannel, considered, ownedByUser };
@@ -327,15 +415,7 @@ export function buildEventRouter(): WebhookEventRouter {
 				type: payload.event.type,
 				summary,
 				key,
-				handled: [
-					outcome.connectionDeleted ? "connection dropped" : "",
-					`${outcome.notified.length} of ${outcome.considered.length} server(s) notified`,
-					outcome.withoutLinkedChannel.length > 0
-						? `${outcome.withoutLinkedChannel.length} without a linked channel`
-						: "",
-				]
-					.filter(Boolean)
-					.join("; "),
+				handled: describeDeauthorizationOutcome(outcome),
 			});
 		})
 		.onAny(async (payload) => {

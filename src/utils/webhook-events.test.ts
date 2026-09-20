@@ -14,6 +14,7 @@ import {
 	candidateGuilds,
 	deauthorizationMessage,
 	deliveryKeyOf,
+	describeDeauthorizationOutcome,
 	linkedChannelTargets,
 	notifyLinkedChannelsOfDeauthorization,
 	summarizeEvent,
@@ -45,6 +46,7 @@ const deauthorizedPayload = (userId = "285118390031351809"): WebhookEventPayload
 function recordingDeps(overrides: Partial<DeauthorizeDeps> = {}) {
 	const sent: { channelId: string; content: string }[] = [];
 	const deleted: string[] = [];
+	const remembered: [string, string][] = [];
 	const deps: DeauthorizeDeps = {
 		listGuilds: async () => ["1525905980422885406", "999999999999999999"],
 		getLobbyRecord: async (guildId) =>
@@ -52,6 +54,9 @@ function recordingDeps(overrides: Partial<DeauthorizeDeps> = {}) {
 				? { lobbyId: "1550964030342959254", creatorId: "285118390031351809" }
 				: { lobbyId: "1", creatorId: "someone-else" },
 		readLinkedChannelId: async () => "1525905982000070780",
+		rememberChannel: async (guildId, channelId) => {
+			remembered.push([guildId, channelId]);
+		},
 		sendChannelMessage: async (channelId, content) => {
 			sent.push({ channelId, content });
 			return { id: "1" };
@@ -61,7 +66,7 @@ function recordingDeps(overrides: Partial<DeauthorizeDeps> = {}) {
 		},
 		...overrides,
 	};
-	return { deps, sent, deleted };
+	return { deps, sent, deleted, remembered };
 }
 
 test("every linked channel is told, not only the one that user linked", async () => {
@@ -182,6 +187,95 @@ test("a lobby without a linked channel is reported, not treated as a failure", a
 		reaped.deps,
 	);
 	assert.deepEqual(reapedOutcome.withoutLinkedChannel, bothGuilds);
+});
+
+test("a reaped lobby does not hide its channel — the remembered channel is used", async () => {
+	// The bug this covers: the target list used to come from a *live* lobby read,
+	// and lobbies are sessions Discord reaps when idle. A guild whose lobby
+	// happened to be idle was dropped from the broadcast in silence, which is
+	// exactly what "it only reached one channel" looks like from Discord.
+	const { deps, sent } = recordingDeps({
+		getLobbyRecord: async (guildId) => ({
+			lobbyId: `lobby-${guildId}`,
+			creatorId: "285118390031351809",
+			channelId: `channel-${guildId}`,
+		}),
+		readLinkedChannelId: async () => {
+			throw new Error("404 — Unknown Lobby");
+		},
+	});
+
+	const outcome = await notifyLinkedChannelsOfDeauthorization(
+		{ id: "285118390031351809", username: "tester" },
+		deps,
+	);
+
+	assert.deepEqual(
+		sent.map((entry) => entry.channelId),
+		["channel-1525905980422885406", "channel-999999999999999999"],
+		"every remembered channel is posted into even though no lobby could be read",
+	);
+	assert.deepEqual(outcome.withoutLinkedChannel, [], "nothing was skipped");
+});
+
+test("the live channel is remembered, so the next notice needs no live lobby at all", async () => {
+	const learned = recordingDeps({
+		getLobbyRecord: async (guildId) => ({
+			lobbyId: `lobby-${guildId}`,
+			creatorId: "285118390031351809",
+		}),
+	});
+	await notifyLinkedChannelsOfDeauthorization({ id: "285118390031351809" }, learned.deps);
+	assert.deepEqual(
+		learned.remembered,
+		[
+			["1525905980422885406", "1525905982000070780"],
+			["999999999999999999", "1525905982000070780"],
+		],
+		"what Discord reported is written to the guild's record",
+	);
+
+	const alreadyStored = recordingDeps({
+		getLobbyRecord: async (guildId) => ({
+			lobbyId: `lobby-${guildId}`,
+			creatorId: "285118390031351809",
+			channelId: "1525905982000070780",
+		}),
+	});
+	await notifyLinkedChannelsOfDeauthorization({ id: "285118390031351809" }, alreadyStored.deps);
+	assert.deepEqual(alreadyStored.remembered, [], "an unchanged value is not rewritten");
+});
+
+test("one unreachable channel neither mutes the others nor disappears", async () => {
+	const { deps, sent } = recordingDeps({
+		listGuilds: async () => ["a", "b", "c"],
+		getLobbyRecord: async (guildId) => ({
+			lobbyId: guildId,
+			creatorId: "u",
+			channelId: `ch-${guildId}`,
+		}),
+		readLinkedChannelId: async () => null,
+		sendChannelMessage: async (channelId) => {
+			if (channelId === "ch-b") throw new Error("Missing Permissions");
+			sent.push({ channelId, content: "" });
+			return { id: "1" };
+		},
+	});
+
+	const outcome = await notifyLinkedChannelsOfDeauthorization({ id: "u", username: "t" }, deps);
+
+	assert.deepEqual(
+		outcome.notified.map((entry) => entry.channelId),
+		["ch-a", "ch-c"],
+		"a channel the bot cannot post in must not stop the ones after it",
+	);
+	assert.equal(outcome.failed.length, 1);
+	assert.match(outcome.failed[0]?.error ?? "", /Missing Permissions/);
+	assert.match(
+		describeDeauthorizationOutcome(outcome),
+		/connection dropped; notified <#ch-a>, <#ch-c>; failed <#ch-b>/,
+		"the log names which channels were reached and which were not",
+	);
 });
 
 test("the notice names the user and explains that linking stops working", () => {

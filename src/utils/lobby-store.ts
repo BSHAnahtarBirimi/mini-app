@@ -61,6 +61,17 @@ export type LobbyRecord = {
 	creatorId: string;
 	/** ISO timestamp of creation. */
 	createdAt: string;
+	/**
+	 * The channel this guild's lobby was last linked to.
+	 *
+	 * Kept because a lobby is a *session* object: Discord reaps it when idle, and
+	 * `GET /lobbies/{id}` then answers `404 Unknown Lobby`. Anything that has to
+	 * reach the linked channel — the `APPLICATION_DEAUTHORIZED` notice above all —
+	 * must not depend on that read, or a server whose lobby happens to be idle is
+	 * silently skipped and looks like "the message only reached one channel".
+	 * Written when a link succeeds, dropped when the record is deleted.
+	 */
+	channelId?: string;
 };
 
 /** Loads the lobby record for a guild, or null if none exists. */
@@ -70,7 +81,27 @@ export async function getLobbyRecord(guildId: string): Promise<LobbyRecord | nul
 	const lobbyId = typeof raw.lobbyId === "string" ? raw.lobbyId : null;
 	const creatorId = typeof raw.creatorId === "string" ? raw.creatorId : null;
 	if (!lobbyId || !creatorId) return null;
-	return { lobbyId, creatorId, createdAt: String(raw.createdAt ?? "") };
+	return {
+		lobbyId,
+		creatorId,
+		createdAt: String(raw.createdAt ?? ""),
+		...(typeof raw.channelId === "string" && raw.channelId !== ""
+			? { channelId: raw.channelId }
+			: {}),
+	};
+}
+
+/**
+ * Remembers the channel a guild's lobby is linked to.
+ *
+ * Best effort by design: failing to remember it must never fail the link that
+ * just succeeded, and the record may legitimately be gone (an unlink racing a
+ * link in two different serverless instances).
+ */
+export async function setLobbyChannel(guildId: string, channelId: string): Promise<void> {
+	const record = await getLobbyRecord(guildId);
+	if (!record || record.channelId === channelId) return;
+	await setLobbyRecord(guildId, { ...record, channelId });
 }
 
 /** Creates (or replaces) the guild's lobby record, indexing the guild. */
