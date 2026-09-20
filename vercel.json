@@ -11,6 +11,10 @@
 		{
 			"source": "/message",
 			"destination": "/message.html"
+		},
+		{
+			"source": "/docs",
+			"destination": "/api/docs"
 		}
 	],
 	"headers": [
@@ -54,6 +58,10 @@
 			"includeFiles": "src/**"
 		},
 		"api/discord-oauth-callback.ts": {
+			"maxDuration": 10,
+			"includeFiles": "src/**"
+		},
+		"api/docs.ts": {
 			"maxDuration": 10,
 			"includeFiles": "src/**"
 		}
