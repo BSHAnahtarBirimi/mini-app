@@ -5,8 +5,27 @@
 			"destination": "/api/index"
 		},
 		{
+			"source": "/activity",
+			"destination": "/api/index?page=activity"
+		},
+		{
 			"source": "/message",
 			"destination": "/message.html"
+		}
+	],
+	"headers": [
+		{
+			"source": "/vendor/(.*)",
+			"headers": [
+				{
+					"key": "Content-Type",
+					"value": "text/javascript; charset=utf-8"
+				},
+				{
+					"key": "Cache-Control",
+					"value": "public, max-age=31536000, immutable"
+				}
+			]
 		}
 	],
 	"functions": {
@@ -28,6 +47,10 @@
 		},
 		"api/message.ts": {
 			"maxDuration": 15,
+			"includeFiles": "src/**"
+		},
+		"api/activity.ts": {
+			"maxDuration": 10,
 			"includeFiles": "src/**"
 		},
 		"api/discord-oauth-callback.ts": {
