@@ -93,33 +93,38 @@ test("the text is taken as written, and an empty one is refused", () => {
 	assert.equal(long.ok, false, "Discord's own limit is enforced here, not discovered there");
 });
 
-test("the reply says the text went into the lobby chat, and names each channel", () => {
+test("the reply is a plain confirmation, and failures name the channel", () => {
 	const reply = describeEchoReply([
 		outcome(),
 		outcome({ channelId: "1551113286156812292", ok: false, error: "403 — Missing Permissions", status: 403 }),
 	]);
 
-	assert.match(reply, /Posted into the lobby chat/);
-	assert.match(reply, /a game reads/i, "the difference from /mesaj is exactly this");
-	assert.match(reply, /Sent into 1 of 2 linked channels/);
-	assert.match(reply, /• <#1525905982000070780>/, "the channel id is shown, not just a count");
-	assert.match(reply, /❌ 403 — Missing Permissions/);
+	assert.match(reply, /Posted to 1 of 2 linked channels/);
+	assert.match(reply, /• <#1551113286156812292> — 403 — Missing Permissions/);
+	assert.doesNotMatch(reply, /`\d+`/, "no Discord message ids — that is debug output, not a reply");
+});
+
+test("a full delivery is one short line", () => {
+	assert.equal(describeEchoReply([outcome()]), "🔊 Posted to 1 linked channel.");
+	assert.equal(
+		describeEchoReply([outcome(), outcome({ channelId: "2" }), outcome({ channelId: "3" })]),
+		"🔊 Posted to all 3 linked channels.",
+	);
 });
 
 test("nothing linked is explained rather than reported as a failure", () => {
 	const reply = describeEchoReply([]);
 	assert.match(reply, /No channel is linked yet/);
-	assert.doesNotMatch(reply, /Posted into the lobby chat/, "nothing was posted, so nothing claims it was");
+	assert.match(reply, /\/linked-channel/);
 });
 
-test("the quota refusal names the command and how long to wait", () => {
+test("the quota refusal says how long to wait", () => {
 	const reply = describeEchoQuotaRefusal({
 		allowed: false,
 		remaining: 0,
 		retryAfterSeconds: 42,
 		enforced: true,
 	});
-	assert.match(reply, /\/echo/);
 	assert.match(reply, /42s/);
 });
 
@@ -160,7 +165,7 @@ test("the member's own token is what goes out, and the work starts after the def
 	assert.equal(seen.text, "merhaba dünya");
 	assert.equal(seen.token, "user-token", "a lobby message is posted as the member, not as the bot");
 	assert.equal(replies.length, 1, "one reply replaces the deferral");
-	assert.match(content(), /Posted into the lobby chat/);
+	assert.match(content(), /Posted to 1 linked channel/);
 	assert.doesNotMatch(content(), /thinking/i);
 });
 
@@ -222,7 +227,7 @@ test("a connection without sdk.social_layer is explained, not sent off to fail w
 	assert.equal(broadcasted, 0);
 	assert.equal(content(), ECHO_NEEDS_SCOPE);
 	assert.match(content(), /sdk\.social_layer/);
-	assert.match(content(), /Reconnect/, "the way out is a reconnect, not a retry");
+	assert.match(content(), /\/authorize/, "the way out is a reconnect, not a retry");
 	assert.match(ECHO_SCOPE_NOTE, /limited access/, "and the text says why that scope is special");
 	assert.match(ECHO_SCOPE_NOTE, /Social SDK access request/);
 });
@@ -242,9 +247,8 @@ test("a failing broadcast is reported once, never retried", async () => {
 	await handler(interaction);
 
 	assert.equal(calls, 1, "one attempt: channel linking is capped per application, so a retry loop is the outage");
-	assert.match(content(), /Could not post into the lobby chat/);
+	assert.match(content(), /Could not post your message/);
 	assert.match(content(), /429/);
-	assert.match(content(), /not\*\* retried/);
 });
 
 test("a channel that refuses is named with Discord's reason, and the others still went out", async () => {
@@ -260,7 +264,7 @@ test("a channel that refuses is named with Discord's reason, and the others stil
 
 	await handler(interaction);
 
-	assert.match(content(), /Sent into 1 of 2 linked channels/);
+	assert.match(content(), /Posted to 1 of 2 linked channels/);
 	assert.match(content(), /<#1551113286156812292>/);
 	assert.match(content(), /404/);
 });
@@ -304,7 +308,7 @@ test("one 401 among successes does not clear a working connection", async () => 
 	await handler(interaction);
 
 	assert.equal(cleared, 0);
-	assert.match(content(), /Sent into 1 of 2 linked channels/);
+	assert.match(content(), /Posted to 1 of 2 linked channels/);
 });
 
 test("a refused quota stops before the token is even read", async () => {
@@ -338,7 +342,7 @@ test("an unreadable quota does not take the command down with it", async () => {
 
 	await handler(interaction);
 
-	assert.match(content(), /Posted into the lobby chat/, "the member asked for their text to be posted");
+	assert.match(content(), /Posted to 1 linked channel/, "the member asked for their text to be posted");
 });
 
 test("a deployment without a database says so instead of reporting no channels", async () => {

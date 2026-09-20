@@ -34,7 +34,7 @@ import type { SlashCommandHandler } from "@minesa-org/mini-interaction";
 
 import { DATABASE_NOT_CONFIGURED_MESSAGE, hasDatabaseConfig } from "./database.ts";
 import { describeError, recordInteractionError } from "./interaction-errors.ts";
-import { broadcastToLinkedChannels, describeBroadcastOutcomes } from "./lobby-broadcast.ts";
+import { broadcastToLinkedChannels } from "./lobby-broadcast.ts";
 import type { BroadcastOutcome } from "./lobby-broadcast.ts";
 import { hasSocialLayerScope, REVOKED_CONNECTION_HINT } from "./lobby-oauth.ts";
 import { deleteUserToken, getFreshUserToken } from "./lobby-tokens.ts";
@@ -56,8 +56,8 @@ export const MAX_ECHO_LENGTH = 2000;
 
 /** What to say when the caller has no stored connection at all. */
 export const ECHO_NEEDS_CONNECTION = [
-	"❌ **Connect your Discord account first.**",
-	"A lobby message is posted as *you*, so it needs your own connection — run `/authorize`, then retry.",
+	"❌ Connect your Discord account first — run `/authorize`, then try again.",
+	"Your text is posted as *you*, so it needs your own connection.",
 ].join("\n");
 
 /**
@@ -74,8 +74,7 @@ export const ECHO_SCOPE_NOTE =
 
 /** What to say when the stored connection exists but lacks the Social SDK scope. */
 export const ECHO_NEEDS_SCOPE = [
-	"⚠️ **Reconnect required** — posting into lobby chat needs the `openid sdk.social_layer` scope.",
-	"Run `/authorize` (or press **🔁 Reconnect Discord** on `/linked-channel`), then retry.",
+	"⚠️ One more step: run `/authorize` again to grant the `sdk.social_layer` permission, then try again.",
 	ECHO_SCOPE_NOTE,
 ].join("\n");
 
@@ -103,31 +102,39 @@ export function checkEchoText(
 }
 
 /**
- * The reply: what was posted, where it went, and which channels refused.
+ * The reply: one line when everything arrived, and Discord's own reason for
+ * each channel that did not.
  *
- * The per-channel part is `describeBroadcastOutcomes` — the same wording the
- * panel's test button uses, because the two do the same thing and a reader should
- * not have to learn two vocabularies for it. The lead-in is what tells the member
- * *which* path this was: a lobby message, so the game sees it.
+ * Deliberately terse. Earlier versions led with an explanation of what a lobby
+ * message *is* and listed a Discord message id per channel — developer narration
+ * nobody asked for. What a member wants from `/echo` is confirmation, or the
+ * name of the channel that refused and why; the mechanics live in `/docs`.
  *
  * Note what is **not** here: a retry. While the application is unapproved,
  * channel linking is capped at 20 calls per 2 hours, so a failed invocation is
- * shown to the member with Discord's own reason and left alone.
+ * reported once with Discord's own reason and left alone.
  */
 export function describeEchoReply(outcomes: BroadcastOutcome[]): string {
-	const report = describeBroadcastOutcomes(outcomes);
-	if (outcomes.length === 0) return report;
+	if (outcomes.length === 0) {
+		return "ℹ️ No channel is linked yet — run `/linked-channel` and link one first.";
+	}
+
+	const sent = outcomes.filter((outcome) => outcome.ok).length;
+	const failed = outcomes.filter((outcome) => !outcome.ok);
+
+	if (failed.length === 0) {
+		return `🔊 Posted to ${sent === 1 ? "1 linked channel" : `all ${sent} linked channels`}.`;
+	}
 
 	return [
-		"🔊 **Posted into the lobby chat.** A lobby message is what a game reads — and it is mirrored into that lobby's linked channel.",
-		"",
-		report,
+		`🔊 Posted to ${sent} of ${outcomes.length} linked channels.`,
+		...failed.map((outcome) => `• <#${outcome.channelId}> — ${outcome.error ?? "failed"}`),
 	].join("\n");
 }
 
 /** The refusal shown when a member echoes too often. */
 export function describeEchoQuotaRefusal(quota: QuotaResult): string {
-	return `⏳ **Slow down.** \`/echo\` posts into every lobby at once, so it is limited to ${quota.retryAfterSeconds}s more — try again then.`;
+	return `⏳ You're sending too fast — try again in ${quota.retryAfterSeconds}s.`;
 }
 
 /** What the handler needs from the outside world, injectable for tests. */
@@ -234,12 +241,7 @@ export function createEchoHandler(deps: EchoDeps = defaultDeps): SlashCommandHan
 			console.error("[echo] broadcast failed:", error);
 			await recordInteractionError(error, "echo");
 			return await interaction.editReply({
-				content: [
-					"❌ **Could not post into the lobby chat.**",
-					`• ${describeError(error)}`,
-					"",
-					"Nothing was sent, and the request was **not** retried.",
-				].join("\n"),
+				content: `❌ Could not post your message.\n• ${describeError(error)}`,
 			});
 		}
 	}) satisfies SlashCommandHandler;

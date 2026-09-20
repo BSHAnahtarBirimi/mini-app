@@ -300,6 +300,13 @@ const COMMANDS: DocsSection = {
 						"The `/echo` sliding window: 5 per minute per member (`consumeEchoQuota`), in a namespace of its own so echoing never spends the member's `/mesaj` budget.",
 					where: "src/utils/web-rate-limit.ts",
 				},
+				{
+					name: "diag:registration",
+					kind: "Key",
+					summary:
+						"The last deploy-time command registration: when it ran, for which commit, and each scope's outcome. `/api/diag` reports a failed attempt — with Discord's own reason — because the registering build deliberately never fails, and its build log needs dashboard access.",
+					where: "src/utils/registration-log.ts · scripts/register-deploy.ts",
+				},
 			],
 		},
 		{
@@ -585,7 +592,7 @@ const ENDPOINTS: DocsSection = {
 						"Read-only JSON diagnostics — the endpoint that answers the questions Vercel's dashboard would otherwise be needed for. Never returns a secret: only *whether* an environment variable is set.",
 					details: [
 						"`problems` — why commands are missing or linking cannot work, in order.",
-						"`?guild=<id>` also reads that server's commands, lobby record and channel menu with privacy verdicts; `?channel=<id>` highlights one of them; `?user=<id>` reports whether that user has a stored connection and which scopes it granted; `?command=authorize` runs the real `/authorize` command against a stub interaction and returns the reply it would send; `?command=echo` does the same for `/echo` with the **send stubbed** (nothing is posted, no quota is spent, `wouldPostTo` lists the channels it would reach); `?fs=1` reports the function's `cwd` and which runtime paths exist.",
+						"`?guild=<id>` also reads that server's commands, lobby record and channel menu with privacy verdicts; `?channel=<id>` highlights one of them; `?user=<id>` reports whether that user has a stored connection and which scopes it granted; `?command=authorize` runs the real `/authorize` command against a stub interaction and returns the reply it would send; `?command=echo` does the same for `/echo` with the **send stubbed** (nothing is posted, no quota is spent, `wouldPostTo` lists the channels it would reach); `?fs=1` reports the function's `cwd` and which runtime paths exist. The response also carries `registration` — what the last deploy-time command registration did per scope (`diag:registration`), which is how a silently failed registration becomes diagnosable.",
 						"`lobbyState` says whether the stored lobby still exists on Discord's side; `linkedChannels` lists exactly what a deauthorization notice would reach; `recentEvents` and `recentFailures` are the last webhook deliveries and handler failures.",
 						"`links.botInvite` is the invite URL to install the bot with `scope=bot+applications.commands` — the linked-roles consent flow does not add the bot to a server.",
 					],

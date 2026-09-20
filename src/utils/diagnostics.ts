@@ -6,6 +6,8 @@
  * decide which problems are reported can be unit tested.
  */
 
+import { describeRegistrationProblem } from "./registration-log.ts";
+
 /** Names of the environment variables the app needs, in the order we report them. */
 export const DIAG_ENV_VARS = [
 	"DISCORD_APPLICATION_ID",
@@ -93,6 +95,19 @@ export type DiagInput = {
 		error: string | null;
 		/** The channels the message *would* have reached, from Discord's own list. */
 		wouldPostTo?: string[];
+	};
+	/**
+	 * The last deploy-time command registration, when the build recorded one.
+	 * The registered-command check below compares Discord's list with the code;
+	 * this explains *why* they differ, because the registering build deliberately
+	 * never fails — its only other trace is a dashboard-only build log.
+	 */
+	registration?: {
+		ok: boolean;
+		at: string;
+		commit?: string;
+		reason?: string;
+		scopes: { scope: string; ok: boolean; error?: string }[];
 	};
 	/**
 	 * Whether the stored lobby still exists on Discord's side (bot-token read).
@@ -191,6 +206,15 @@ export function deriveProblems(input: DiagInput): string[] {
 		problems.push(
 			`/echo could not produce a reply: ${input.echoCommand.error ?? "no payload and no error"} — pressing it would leave "«bot» is thinking…".`,
 		);
+	}
+
+	// 4d. The build-time command registration (`diag:registration`). The
+	//     registered-list check above can say that Discord is out of date; the
+	//     recorded attempt says why — which scope failed and with what reason —
+	//     without dashboard access to the build log.
+	if (input.registration) {
+		const problem = describeRegistrationProblem(input.registration);
+		if (problem) problems.push(problem);
 	}
 
 	// 5. Bot token validity — bot-authenticated calls (channel list, lobbies,

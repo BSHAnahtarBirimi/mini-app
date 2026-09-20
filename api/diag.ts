@@ -67,6 +67,7 @@ import { getLobbyRecord } from "../src/utils/lobby-store.js";
 import type { LobbyRecord } from "../src/utils/lobby-store.js";
 import { describeLobbyError, getLobby } from "../src/utils/lobby-api.js";
 import { describeError, getInteractionErrors } from "../src/utils/interaction-errors.js";
+import { getRegistration } from "../src/utils/registration-log.js";
 import { getRecentEvents } from "../src/utils/event-log.js";
 import { linkedChannelTargets } from "../src/utils/webhook-events.js";
 import {
@@ -530,6 +531,11 @@ export default async function handler(req: DiagRequest, res: DiagResponse): Prom
 	// What Discord's Webhook Events endpoint sent us. Recording them is the only
 	// way to tell "never configured" from "configured, nothing happened yet".
 	const recentEvents = await getRecentEvents();
+	// What the last deploy-time command registration did, per scope. This is the
+	// only trace a registering build leaves that does not need dashboard access —
+	// the build itself deliberately never fails, so a silent failure here is how
+	// the live command list ends up behind the code.
+	const registration = await getRegistration();
 	// Which linked channels an `APPLICATION_DEAUTHORIZED` notice would reach.
 	// Reported so that "did my second server get it?" is answerable directly,
 	// instead of by deauthorizing the app and watching. Bounded (see
@@ -577,6 +583,7 @@ export default async function handler(req: DiagRequest, res: DiagResponse): Prom
 		},
 		recentFailures,
 		recentEvents,
+		registration: registration ?? undefined,
 		lobbyState,
 		expectedCommands: modules.expectedCommands,
 		bot,
@@ -611,6 +618,7 @@ export default async function handler(req: DiagRequest, res: DiagResponse): Prom
 		userToken,
 		recentFailures,
 		recentEvents,
+		...(registration ? { registration } : {}),
 		linkedChannels,
 		payloads,
 		...(authorizeCommand ? { authorizeCommand } : {}),

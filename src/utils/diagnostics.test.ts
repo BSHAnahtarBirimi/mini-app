@@ -221,6 +221,28 @@ test("a received event clears that problem, including a PING from saving the URL
 	assert.doesNotMatch(problems, /Webhook Events/);
 });
 
+test("a failed deploy-time registration is a problem, naming the scope and reason", () => {
+	const problems = joined({
+		...healthy(),
+		registration: {
+			at: "2026-09-20T12:00:00.000Z",
+			commit: "277a138",
+			ok: false,
+			scopes: [{ scope: "global", ok: false, error: "401: Unauthorized" }],
+		},
+	});
+	assert.match(problems, /deploy-time command registration did not complete/);
+	assert.match(problems, /global: 401: Unauthorized/);
+
+	// A healthy recording is not a problem — and neither is its absence, which is
+	// what deployments built before the log existed report.
+	assert.doesNotMatch(
+		joined({ ...healthy(), registration: { at: "2026-09-20T12:00:00.000Z", ok: true, scopes: [{ scope: "global", ok: true }] } }),
+		/registration/,
+	);
+	assert.doesNotMatch(joined(healthy()), /registration/);
+});
+
 test("a command probe that produced no reply is a problem; a healthy one is not", () => {
 	const failing = joined({
 		...healthy(),
