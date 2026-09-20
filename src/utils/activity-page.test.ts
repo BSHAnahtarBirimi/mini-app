@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -120,6 +121,51 @@ test("the vendored SDK is complete, not partially copied", async () => {
 		missing.map((file) => path.relative(publicDir, file)),
 		[],
 		"these SDK modules are referenced but not vendored",
+	);
+});
+
+test("every vendored SDK file is committed, not merely present", async () => {
+	// `/vendor` is served from the *deployment*, so a file that exists on disk but
+	// is not in git is missing in production — and if it is a module the SDK
+	// imports, the frame is blank again with nothing to inspect.
+	//
+	// This is not hypothetical: the vendored tree contains
+	// `lib/uuid/dist/esm-browser/v4.mjs`, and `.gitignore`'s build-output rule
+	// was `dist/` (matching a directory named `dist` at *any* depth), which
+	// silently dropped four files. Nothing local noticed, because locally they
+	// exist; only CI's copy of this check did.
+	const onDisk = (
+		await readdir(path.join(publicDir, "vendor"), { recursive: true, withFileTypes: true })
+	)
+		.filter((entry) => entry.isFile())
+		.map((entry) => path
+			.relative(publicDir, path.join(entry.parentPath, entry.name))
+			.split(path.sep)
+			.join("/"))
+		.sort();
+
+	let tracked: string[];
+	try {
+		tracked = execFileSync("git", ["ls-files", "public/vendor"], {
+			cwd: projectRoot,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+		})
+			.split("\n")
+			.map((line) => line.trim())
+			.filter(Boolean)
+			.map((line) => line.replace(/^public\//, ""))
+			.sort();
+	} catch {
+		// No git (a tarball checkout): the existence checks above still apply.
+		return;
+	}
+
+	const untracked = onDisk.filter((file) => !tracked.includes(file));
+	assert.deepEqual(
+		untracked,
+		[],
+		`these vendored files are not committed — check .gitignore (an unanchored \`dist/\` used to swallow one) and re-run \`npm run activity-vendor\`:\n${untracked.join("\n")}`,
 	);
 });
 
