@@ -30,6 +30,18 @@ export const WEB_RATE_KEY_PREFIX = "web-msg-rate:";
 
 export const rateKeyFor = (ip: string) => `${WEB_RATE_KEY_PREFIX}${ip}`;
 
+/**
+ * MiniDatabase key prefix: one record per **member** (the `/mesaj` command).
+ *
+ * A separate namespace on purpose. The web endpoint is limited per address
+ * because it has no accounts; the command is limited per member because a member
+ * is who it has. Sharing one prefix would let an address and a snowflake occupy
+ * the same key, and the two limits would then interfere for no reason.
+ */
+export const COMMAND_RATE_KEY_PREFIX = "cmd-msg-rate:";
+
+export const commandRateKeyFor = (userId: string) => `${COMMAND_RATE_KEY_PREFIX}${userId}`;
+
 /** Drops timestamps that have fallen out of the window. Pure. */
 export function pruneTimestamps(
 	timestamps: number[],
@@ -87,18 +99,17 @@ function isTimestampArray(value: unknown): value is number[] {
 }
 
 /**
- * Counts this message against the visitor's quota, or refuses it.
+ * Counts one attempt against `key`'s quota, or refuses it.
  *
  * A database failure is treated as "allow, not enforced": the point of the limit
  * is abuse, and a storage outage must not take the feature down with it.
  */
-export async function consumeQuota(ip: string, now: number = Date.now()): Promise<QuotaResult> {
+async function consume(key: string, what: string, now: number): Promise<QuotaResult> {
 	if (!hasDatabaseConfig()) {
 		return { allowed: true, remaining: MAX_PER_WINDOW - 1, retryAfterSeconds: 0, enforced: false };
 	}
 
 	try {
-		const key = rateKeyFor(ip);
 		const raw = await getDb().get(key);
 		const timestamps = isTimestampArray(raw?.timestamps) ? raw.timestamps : [];
 		const decision = decideQuota(timestamps, now);
@@ -107,7 +118,26 @@ export async function consumeQuota(ip: string, now: number = Date.now()): Promis
 		await getDb().set(key, { timestamps: [...pruneTimestamps(timestamps, now), now] });
 		return { ...decision, enforced: true };
 	} catch (error) {
-		console.error("[web-rate-limit] could not record the message:", error);
+		console.error(`[web-rate-limit] could not record the ${what}:`, error);
 		return { allowed: true, remaining: 0, retryAfterSeconds: 0, enforced: false };
 	}
+}
+
+/** Counts this message against the visitor's (IP's) quota, or refuses it. */
+export async function consumeQuota(ip: string, now: number = Date.now()): Promise<QuotaResult> {
+	return await consume(rateKeyFor(ip), "message", now);
+}
+
+/**
+ * The same window for a **member** running `/mesaj`.
+ *
+ * One invocation posts into every linked channel the app maintains, so a member
+ * who repeats it is broadcasting to every server repeatedly — the limit exists
+ * for the same reason the web app's does.
+ */
+export async function consumeCommandQuota(
+	userId: string,
+	now: number = Date.now(),
+): Promise<QuotaResult> {
+	return await consume(commandRateKeyFor(userId), "command", now);
 }

@@ -1,26 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-	DEFAULT_NAME,
-	MAX_MESSAGE_LENGTH,
-	MAX_NAME_LENGTH,
-	checkWebMessage,
-	cleanName,
-	composeWebMessage,
-} from "./web-message.ts";
+import { MAX_MESSAGE_LENGTH, checkWebMessage, cleanText } from "./web-message.ts";
 
 /**
  * The web app's endpoint is open: anyone with the link may post, and the message
- * goes to every linked channel. These rules are therefore the only thing between
- * a stranger's input and the app's servers, and the two that matter are that the
- * attribution cannot be forged (the name is rendered in bold by the app itself)
- * and that the body cannot exceed what a Discord message holds.
+ * goes to every linked channel. What these rules decide is therefore the whole of
+ * the contract — that an empty or oversized message is refused with a reason, and
+ * that a message that is accepted is posted **exactly as written**, with nothing
+ * of the app's own voice around it (which is also why there is no attribution
+ * field left to forge).
  */
 
 test("an empty or whitespace-only message is refused with a reason", () => {
 	for (const text of ["", "   ", "\n\n", undefined, 42, null]) {
-		const checked = checkWebMessage({ name: "tester", text });
+		const checked = checkWebMessage({ text });
 		assert.equal(checked.ok, false, `text ${JSON.stringify(text)} must be refused`);
 		if (checked.ok) continue;
 		assert.equal(checked.status, 400);
@@ -39,58 +33,42 @@ test("a message over the limit is refused, and says how long it was", () => {
 	assert.equal(atLimit.ok, true, "exactly the limit is allowed");
 });
 
-test("a missing name still produces an attribution", () => {
-	assert.equal(cleanName(undefined), DEFAULT_NAME);
-	assert.equal(cleanName(""), DEFAULT_NAME);
-	assert.equal(cleanName("   \n "), DEFAULT_NAME);
-	assert.equal(cleanName(42), DEFAULT_NAME);
-
-	const checked = checkWebMessage({ text: "hello" });
-	assert.equal(checked.ok, true);
-	if (!checked.ok) return;
-	assert.equal(checked.name, DEFAULT_NAME);
-});
-
-test("a name is one line, bounded, and cannot forge the app's formatting", () => {
-	assert.equal(cleanName("  Neo\nDevils  "), "Neo Devils", "newlines are collapsed, not kept");
-	assert.equal(cleanName("a".repeat(80)).length, MAX_NAME_LENGTH);
-	assert.equal(cleanName("Neo\tDevils"), "Neo Devils", "control characters become spaces");
-
-	// The name is rendered as `**name**` by the app, so a name carrying its own
-	// markdown could close that bold run and impersonate a second speaker.
-	assert.equal(cleanName("**Admin**"), "\\*\\*Admin\\*\\*");
-	assert.equal(cleanName("> quoted"), "\\> quoted");
-	assert.equal(cleanName("back`tick`"), "back\\`tick\\`");
-
-	const checked = checkWebMessage({ name: "**Admin**", text: "hi" });
-	assert.equal(checked.ok, true);
-	if (!checked.ok) return;
-	assert.equal(
-		checked.content,
-		`💬 **${cleanName("**Admin**")}** — sent from the web app\n> hi`,
-		"the bold run the app opens with is closed by the app, not by the name",
-	);
-});
-
-test("the body keeps the author's own formatting, quoted", () => {
-	const checked = checkWebMessage({ name: "tester", text: "line one\nline two\n\nline four" });
+test("the message is posted as written — nothing is wrapped around it", () => {
+	const checked = checkWebMessage({ text: "  Merhabaaa  " });
 	assert.equal(checked.ok, true);
 	if (!checked.ok) return;
 
-	assert.equal(checked.text, "line one\nline two\n\nline four");
-	assert.equal(
-		checked.content,
-		[
-			"💬 **tester** — sent from the web app",
-			"> line one",
-			"> line two",
-			"> ",
-			"> line four",
-		].join("\n"),
-		"each line is quoted so the body cannot be read as the app speaking",
-	);
+	assert.equal(checked.text, "Merhabaaa", "trimmed");
+	assert.equal(checked.content, "Merhabaaa", "and posted verbatim: no header, no quote, no name");
 });
 
-test("carriage returns are normalised so the quote holds together", () => {
-	assert.equal(composeWebMessage("t", "a\r\nb\rc"), "💬 **t** — sent from the web app\n> a\n> b\n> c");
+test("markdown the author typed is theirs, and passes through untouched", () => {
+	// A message is a message: the author's own formatting is what Discord renders
+	// for any member. What the app must not do is *add* a voice of its own (a bold
+	// run, a quote block) for text it did not write — and it no longer does.
+	for (const text of ["**bold**", "> quoted", "# heading", "`code`", "~~strike~~"]) {
+		const checked = checkWebMessage({ text });
+		assert.equal(checked.ok, true, `${text} is allowed`);
+		if (!checked.ok) continue;
+		assert.equal(checked.content, text);
+	}
+});
+
+test("line structure is preserved, since nothing re-indents it", () => {
+	assert.equal(cleanText("line one\nline two\n\nline four"), "line one\nline two\n\nline four");
+
+	const checked = checkWebMessage({ text: "a\r\nb\rc" });
+	assert.equal(checked.ok, true);
+	if (!checked.ok) return;
+	assert.equal(checked.content, "a\nb\nc", "carriage returns are normalised, not dropped");
+});
+
+test("a name in the request body is ignored rather than rendered", () => {
+	// The field used to be rendered as `**name**` by the app, which meant it had
+	// to be escaped against closing that bold run. It is gone: an attribution can
+	// no longer be forged because there is no attribution.
+	const checked = checkWebMessage({ text: "hi", name: "**Admin**" } as { text: unknown });
+	assert.equal(checked.ok, true);
+	if (!checked.ok) return;
+	assert.equal(checked.content, "hi");
 });
