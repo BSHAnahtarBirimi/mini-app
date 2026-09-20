@@ -62,19 +62,20 @@ const joinButton = () =>
 	new ButtonBuilder().setStyle(ButtonStyle.Primary).setCustomId("lc:join").setLabel("🏠 Join Discord server");
 
 /**
- * Posts a message through the lobby, as a game does.
+ * Posts a message through the lobby, as a game does — into **every** linked
+ * channel this app maintains.
  *
  * The linked-channel experience itself lives inside a Social SDK client, so
  * this is the only way to see the link work from Discord: the message is sent
  * with the calling user's token and lands in the linked channel. It is also the
  * quickest "is this link actually alive?" check — a lobby without a linked
- * channel is refused by Discord.
+ * channel is refused by Discord, and the reply names each channel's result.
  */
 const testButton = () =>
 	new ButtonBuilder()
 		.setStyle(ButtonStyle.Secondary)
 		.setCustomId("lc:test")
-		.setLabel("✉️ Send a test message");
+		.setLabel("✉️ Test all linked channels");
 
 const reconnectButton = (url: string) =>
 	new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel("🔁 Reconnect Discord").setURL(url);
@@ -112,9 +113,10 @@ const manageText = (lobbyId: string) =>
 		"### 🛠️ Manage the link",
 		`**Lobby:** \`${lobbyId}\``,
 		"Linking requires Manage Channels, View Channel and Send",
-		"Messages permissions on the chosen channel. **Send a test",
-		"message** posts into the linked channel from the lobby — the",
-		"same call a game makes.",
+		"Messages permissions on the chosen channel. **Test all linked",
+		"channels** posts into every linked channel this app maintains,",
+		"from the lobby — the same call a game makes — and names the",
+		"channels Discord accepted.",
 	].join("\n");
 
 /** The `/linked-channel` panel: link, unlink, join, and Reconnect when needed. */

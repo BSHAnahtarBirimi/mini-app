@@ -1,35 +1,39 @@
 import { MessageFlags } from "@minesa-org/mini-interaction";
 import type { ComponentHandler } from "@minesa-org/mini-interaction";
 
-import { getLobbyRecord } from "../utils/lobby-store.ts";
 import { deleteUserToken, getFreshUserToken } from "../utils/lobby-tokens.ts";
 import { hasSocialLayerScope, REVOKED_CONNECTION_HINT } from "../utils/lobby-oauth.ts";
 import {
-	describeLobbyError,
-	sendLobbyMessage,
-	DiscordRestApiError,
-	LobbyCallTimeoutError,
-} from "../utils/lobby-api.ts";
-import { isUnknownLobbyError } from "../utils/lobby-lifecycle.ts";
+	broadcastToLinkedChannels,
+	describeBroadcastOutcomes,
+} from "../utils/lobby-broadcast.ts";
+import { describeLobbyError, LobbyCallTimeoutError } from "../utils/lobby-api.ts";
 import { recordInteractionError } from "../utils/interaction-errors.ts";
 
-/** What the test message says once it lands in the linked channel. */
+/** What the test message says once it lands in the linked channel(s). */
 export const TEST_MESSAGE =
 	"👋 Test message sent from the app's lobby — this is how a message posted inside the game appears in the linked channel.";
 
 /**
- * `lc:test` — "Send a test message".
+ * `lc:test` — "Send a test message to every linked channel".
  *
- * Posts into the lobby with the calling user's OAuth2 Bearer token
- * (`POST /lobbies/{lobby.id}/messages`, needs `openid sdk.social_layer`). That is
- * exactly what a Social SDK client does when a player sends a message in-game:
- * the message is delivered to the lobby and mirrored into the linked channel,
- * which is the part of Linked Channels no Discord UI can show. It also fails
- * loudly when the lobby has no linked channel, so it doubles as a check that the
- * link is actually live.
+ * Posts into **every** lobby this app maintains, with the calling user's OAuth2
+ * Bearer token (`POST /lobbies/{lobby.id}/messages`, needs
+ * `openid sdk.social_layer`). That is exactly what a Social SDK client does when
+ * a player sends a message in-game: the message is delivered to the lobby and
+ * mirrored into its linked channel, which is the part of Linked Channels no
+ * Discord UI can show.
  *
- * Defers first: reading the lobby and the stored token and then posting is past
- * Discord's 3 second first-response deadline (see response-timing.test.ts).
+ * It goes to all of them, not only this server's, because an application with
+ * links in several servers otherwise has no way to see that they all still work
+ * — and because Discord has no broadcast primitive, a loop over the links is the
+ * only mechanism that exists (see `lobby-broadcast.ts`). The reply names each
+ * channel and Discord's answer for it, so a link that stopped working is visible
+ * instead of looking like the app only ever posts in one place.
+ *
+ * Defers first: listing the lobbies, reading the stored token and posting into
+ * each is past Discord's 3 second first-response deadline (see
+ * `response-timing.test.ts`).
  */
 export const sendTestMessageButton = {
 	customId: "lc:test",
@@ -42,14 +46,6 @@ export const sendTestMessageButton = {
 		const userId = interaction.member?.user?.id ?? interaction.user?.id;
 		if (!guildId || !userId) {
 			return interaction.editReply({ content: "❌ This only works inside a server." });
-		}
-
-		const record = await getLobbyRecord(guildId);
-		if (!record) {
-			return interaction.editReply({
-				content:
-					"ℹ️ No lobby is configured for this server yet — link a channel first, then this button posts into it.",
-			});
 		}
 
 		const storedToken = await getFreshUserToken(userId);
@@ -67,16 +63,30 @@ export const sendTestMessageButton = {
 		}
 
 		try {
-			const message = await sendLobbyMessage(record.lobbyId, TEST_MESSAGE, storedToken.accessToken);
+			const outcomes = await broadcastToLinkedChannels(TEST_MESSAGE, storedToken.accessToken);
+			const failed = outcomes.filter((outcome) => !outcome.ok);
 
-			return interaction.editReply({
-				content: [
-					"✅ **Sent.** The message went in through the lobby (as a game would), so it now appears in the linked channel.",
-					"",
-					`Lobby message id: \`${message.id}\``,
-					"If nothing shows up in the channel, the lobby has no linked channel — check **Link a channel** first.",
-				].join("\n"),
-			});
+			// Every channel refused the stored user token: the account revoked the
+			// app. Drop the dead record so nothing keeps claiming a connection.
+			const allRejected =
+				outcomes.length > 0 &&
+				failed.length === outcomes.length &&
+				failed.every((outcome) => outcome.status === 401);
+			if (allRejected) {
+				console.error("[lc:test] stored connection was revoked:", failed[0]?.error);
+				await deleteUserToken(userId).catch(() => undefined);
+				await recordInteractionError(
+					new Error(`every linked channel rejected the stored token: ${failed[0]?.error ?? ""}`),
+					"lc:test:revoked",
+				);
+				return interaction.editReply({ content: REVOKED_CONNECTION_HINT });
+			}
+
+			for (const outcome of failed) {
+				console.error(`[lc:test] <#${outcome.channelId}> refused the message:`, outcome.error);
+			}
+
+			return interaction.editReply({ content: describeBroadcastOutcomes(outcomes) });
 		} catch (error) {
 			if (error instanceof LobbyCallTimeoutError) {
 				console.error("[lc:test] lobby message timed out:", error.message);
@@ -90,36 +100,14 @@ export const sendTestMessageButton = {
 					].join("\n"),
 				});
 			}
-			if (isUnknownLobbyError(error)) {
-				return interaction.editReply({
-					content: [
-						"⌛ **This lobby no longer exists on Discord's side.** Lobbies are session objects Discord reaps when idle — link a channel again and retry.",
-					].join("\n"),
-				});
-			}
-			// Discord rejected the stored user token: the account revoked the app.
-			if (error instanceof DiscordRestApiError && error.status === 401) {
-				console.error("[lc:test] stored connection was revoked:", error.body);
-				await deleteUserToken(userId).catch(() => undefined);
-				await recordInteractionError(error, "lc:test:revoked");
-				return interaction.editReply({ content: REVOKED_CONNECTION_HINT });
-			}
-			if (error instanceof DiscordRestApiError) {
-				console.error("[lc:test] lobby message failed:", error.status, error.body);
-				return interaction.editReply({
-					content: [
-						"❌ **Discord refused the message.**",
-						`• ${describeLobbyError(error)}`,
-						"",
-						"The lobby must have a linked channel, and you must be one of its members. `403` usually means the `openid sdk.social_layer` scope is missing on your connection.",
-					].join("\n"),
-				});
-			}
 			console.error("[lc:test] unexpected error:", error);
+			await recordInteractionError(error, "lc:test");
 			return interaction.editReply({
 				content: [
-					"❌ **Unexpected error while sending.**",
-					`• ${error instanceof Error ? error.message : String(error)}`,
+					"❌ **Could not list the linked channels.**",
+					`• ${describeLobbyError(error)}`,
+					"",
+					"Nothing was sent, and the request was **not** retried.",
 				].join("\n"),
 			});
 		}

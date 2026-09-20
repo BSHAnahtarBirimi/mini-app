@@ -1,7 +1,7 @@
 import { MessageFlags } from "@minesa-org/mini-interaction";
 import type { ComponentHandler } from "@minesa-org/mini-interaction";
 
-import { getLobbyRecord } from "../utils/lobby-store.ts";
+import { getLobbyRecord, setLobbyChannel } from "../utils/lobby-store.ts";
 import type { LobbyRecord } from "../utils/lobby-store.ts";
 import { getPendingLink, clearPendingLink } from "../utils/linked-channel-state.ts";
 import { deleteUserToken, getFreshUserToken } from "../utils/lobby-tokens.ts";
@@ -73,6 +73,15 @@ export const confirmLinkButton = {
 			// create a fresh lobby with this admin carrying CanLinkLobby and retry
 			// the link a single time. Never a loop (20 link calls / 2 h per app).
 			const lobby = await linkWithLobby(guildId, stored, pending.channelId, userId, storedToken.accessToken);
+
+			// Remember the channel on the guild's record. The lobby this link lives
+			// on is a session object Discord will reap, but the channel is not — and
+			// the deauthorize notice has to reach it whether or not the lobby is
+			// still alive (see lobby-store.ts and webhook-events.ts). Never fatal:
+			// the link itself succeeded.
+			await setLobbyChannel(guildId, pending.channelId).catch((error) =>
+				console.error("[lc:confirm] could not remember the linked channel:", error),
+			);
 
 			const channelMention = pending.channelName
 				? `**#${pending.channelName}**`

@@ -25,6 +25,7 @@ endpoint file.
 | `src/components/lc_*.ts` | Linked Channels flow components (`lc:link`, `lc:pick`, `lc:confirm`, `lc:cancel`, `lc:unlink`, `lc:join`, `lc:test`) |
 | `src/utils/authorize-panel.ts` | The `/authorize` message: connection status + the consent link |
 | `src/utils/webhook-events.ts` | Webhook Events router + the deauthorize → linked-channel notice |
+| `src/utils/lobby-broadcast.ts` | One message, sent into **every** linked channel, with a per-channel result |
 | `src/utils/event-log.ts` | Received events, kept for `/api/diag` and for retry dedupe |
 | `src/utils/lobby-api.ts` | Lobby API wrappers over the package's `DiscordRestClient` (fail-fast: `maxRetries: 0`) |
 | `src/utils/lobby-store.ts` | Per-guild lobby records on `MiniDatabase` (`lc:${guildId}`) + a guild index used as a fallback when enumerating them |
@@ -283,16 +284,48 @@ and the test message:
 | Panel, channel pick, warning step, link/unlink | `/linked-channel` in your server | The panel and its ephemeral answers |
 | Grant / restore your connection | **`/authorize`** (or **🔁 Reconnect Discord** on the panel) | The consent page, then `userToken.hasSocialLayer: true` in `/api/diag?user=…` |
 | The command itself, without typing anything | `GET /api/diag?command=authorize&user=<id>` | The reply `/authorize` would send — the link, and whether that connection is confirmed, incomplete or revoked |
-| A message going *through* the lobby | **✉️ Send a test message** on the panel (`lc:test`) | The message appears in the linked channel — this is the call a game makes via `sendLobbyMessage` |
+| A message going *through* the lobby | **✉️ Test all linked channels** on the panel (`lc:test`) | The message appears in **every** linked channel this app maintains — this is the call a game makes via `sendLobbyMessage` — and the reply names each channel with Discord's answer for it |
 | A lobby invite for a member | **🏠 Join Discord server** (`lc:join`) | A one-use `discord.gg` invite to the linked channel's server |
 | What Discord tells your app | **Webhooks** page + `GET /api/diag` → `recentEvents` | `PING` when the URL is saved, then one line per subscribed event |
 | The link itself | `/api/diag?guild=<id>` → `lobbyState` | The stored lobby's live state and its `linkedChannelId` |
 
 So the shortest end-to-end check is: `/linked-channel` → **Link a channel** →
-pick a channel → **Link anyway** → **✉️ Send a test message**, and watch your
+pick a channel → **Link anyway** → **✉️ Test all linked channels**, and watch your
 message arrive in the channel. A message posted in the channel by a real user
 posts *into* the lobby as well, which is why the linked channel is a two-way
 bridge once a game is connected.
+
+### How a message reaches every channel
+
+Discord has **no broadcast primitive**, and nothing in the Developer Portal gives
+you one: a webhook event, a Gateway event, a guild Scheduled Event and a Push
+Event are all *notifications to your app*, not a way to post into a set of
+channels. The only mechanism that exists is the loop in
+`src/utils/lobby-broadcast.ts` — discover the linked channels, then post into
+each. Three consequences are worth knowing before you design around it:
+
+- **The bot must be in each server** (it is a normal member posting a normal
+  message), which is why the target list comes from `GET /users/@me/guilds`.
+- **One channel can fail alone.** The sends run under `Promise.allSettled`, so a
+  channel the bot cannot post in is reported (`⚠️ Sent into 2 of 3`) instead of
+  muting the rest — and instead of eating the whole function timeout, which a
+  sequential loop over many servers would.
+- **A lobby does not have to be alive to post.** The *notice* path
+  (`APPLICATION_DEAUTHORIZED`) posts with the **bot** token straight into the
+  channel, using the channel remembered on the guild's record, so a lobby
+  Discord has already reaped cannot swallow it. Only the *test* button goes
+  through a lobby, because that is the call a game makes; a reaped lobby there is
+  reported as `404` with what to do about it.
+
+### Why the channel is remembered
+
+A lobby is a session object and the channel is not, so `lc:${guildId}` also
+stores `channelId` — written when a link succeeds (`lc:confirm`) and refreshed
+the first time a live lobby read reports it. Before that, the notify step derived
+its targets from a **live** `GET /lobbies/{id}` read, which meant a server whose
+lobby happened to be idle at that moment was dropped from the broadcast in
+silence: the message arrived in one channel and nothing anywhere said why. That
+is the failure this field exists to prevent.
 
 ### Package version note
 
@@ -360,6 +393,19 @@ invalid immediately. `src/utils/webhook-events.ts` therefore
    relies on is gone. Lobbies with no linked channel (or an id Discord has
    already reaped) are reported, not treated as failures.
 
+The log line answers "did every channel get it?" directly, because that is the
+question a partial delivery turns into a support thread:
+
+```
+APPLICATION_DEAUTHORIZED  deauthorized by tester (2851…)
+  handled: connection dropped; notified <#1525905982000070780>, <#1550970323917340694>
+```
+
+A channel the notice could not reach appears as `failed <#…> (403 — Missing
+Permissions)` instead, and the delivery is still acknowledged — Discord retries a
+failed delivery, and a retry would re-notify the channels that already
+succeeded.
+
 The notice is deliberately **not** scoped to the servers whose link that user
 created: which account was linked last is not what the other servers need to
 know. To scope it that way, filter the `considered` targets by
@@ -376,6 +422,12 @@ linked channel), and then `lc:${guildId}` is read for each one. The stored index
 That order matters: a write-time index alone is blind to every lobby created
 before the index existed, which is exactly how a channel linked in a second
 server stayed invisible to the first version of this handler.
+
+Once a guild is known, its channel comes from the live lobby when Discord still
+has one and from the guild's record when it does not (`channelId`), so the
+broadcast never depends on a session object surviving. `/api/diag` →
+`linkedChannels` reports the exact list a deauthorization would reach — check it
+*before* removing the app rather than inferring it from what arrives.
 
 Delivery is **at-least-once**: the handled marker is written *after* the work
 succeeds, so a failed delivery is retried and processed again, while a duplicate
