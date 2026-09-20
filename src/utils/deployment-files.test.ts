@@ -20,7 +20,13 @@ import { fileURLToPath } from "node:url";
  * still absent at runtime.
  */
 
-const FUNCTION_FILES = ["index.ts", "interactions.ts", "diag.ts", "discord-oauth-callback.ts"];
+const FUNCTION_FILES = [
+	"index.ts",
+	"interactions.ts",
+	"diag.ts",
+	"discord-oauth-callback.ts",
+	"docs.ts",
+];
 
 /**
  * `src/**` is shipped as raw TypeScript, and the modules inside it import each

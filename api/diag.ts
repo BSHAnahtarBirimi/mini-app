@@ -542,7 +542,9 @@ export default async function handler(req: DiagRequest, res: DiagResponse): Prom
 			// The Activity: the same reach, inside Discord. Open it in a browser to
 			// check the page and its assets load; inside Discord it is reached at
 			// the root, which is what the URL mapping below must target.
-			activityPage: hostHeader ? `https://${hostHeader}${ACTIVITY_PAGE_PATH}` : null,
+			// The documentation site, served from `api/docs.ts` (rewritten from
+			// `/docs`): every command, component, endpoint and exported function.
+			docsPage: hostHeader ? `https://${hostHeader}/docs` : null,
 			activityUrlMapping: hostHeader
 				? { prefix: "/", target: `https://${hostHeader}/` }
 				: null,

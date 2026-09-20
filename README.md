@@ -29,6 +29,9 @@ endpoint file.
 | `src/components/ping_button.ts` | Button → modal with a modal-side select menu |
 | `src/components/ping_menu.ts` | Select menu component handler |
 | `src/modals/ping_modal.ts` | Modal submit handler |
+| `api/docs.ts` | `/docs` — the documentation site: every command, component, endpoint and exported function |
+| `src/utils/docs-content.ts` | What the site documents (data) — kept in sync with the source tree by its test |
+| `src/utils/docs-page.ts` | How it is rendered: escaping, anchors, search, sidebar |
 | `src/utils/database.ts` | Shared `MiniDatabase` instance + helpers |
 | `src/commands/linked-channel.ts` | `/linked-channel` — Linked Channels admin panel |
 | `src/commands/authorize.ts` | `/authorize` — grants (or restores) this app's connection to your account |
@@ -204,6 +207,47 @@ working. `src/utils/module-specifiers.test.ts` enforces this for `src/`.
 | Component | `interaction.getStringValues()`, `interaction.getUser()`, `interaction.showModal()` | `interaction.reply()`, `interaction.deferReply()` |
 | Modal | `interaction.getTextFieldValue()`, `interaction.getSelectMenuValues()`, `interaction.getRadioGroupValue()` | `interaction.reply()` |
 
+## Documentation site (`/docs`)
+
+`/docs` is the app's own reference — every slash command, every `lc:*` / `test_*`
+component, every endpoint under `/api/`, every page, and every exported function
+of `src/utils`, with signatures, the file each one lives in, and the reasoning
+that is easy to forget (why a lobby has to be re-created, why privacy has to be
+derived, why a link is never retried). It is searchable, has a sidebar of
+anchors, and renders without JavaScript: the script only filters and highlights.
+
+The page is **rendered from code**, not read from disk — `api/docs.ts` returns
+`docsPage()` from `src/utils/docs-page.ts` — for the same reason the OAuth pages
+are: Vercel serves `index.html` and `public/**` as static output and does not put
+them inside a function bundle, so a function that reads a page from disk answers
+`FUNCTION_INVOCATION_FAILED`. `vercel.json` rewrites `/docs` to the function.
+
+What is documented lives in `src/utils/docs-content.ts` as plain data; the
+renderer escapes every interpolated string (`escapeHtml` from `oauth-pages.ts`)
+and only then applies a tiny inline-markup subset, because documentation is
+mostly code samples and this page documents `<@123>`, `@everyone` and `1 << 0`.
+
+**The content cannot go stale.** `src/utils/docs-content.test.ts` reads the
+source tree and fails the build when the app grows something the content does not
+describe:
+
+- every `new CommandBuilder().setName(…)` in `src/commands`,
+- every `customId` / `custom_id` in `src/components` and in
+  `src/utils/linked-channel-panel.ts`,
+- every file in `api/` (each must be reachable as `/api/<name>`, or `api/index`),
+- every variable in `DIAG_ENV_VARS`,
+- every storage key, **derived from the functions that build it** (`lobbyKeyFor`,
+  `rateKeyFor`, `commandRateKeyFor`, …) so a renamed prefix cannot stay
+  documented under its old name,
+- every `where:` reference (a file that no longer exists fails the test),
+- and that `/docs` is the path `vercel.json` actually rewrites.
+
+So adding a command means adding it to `docs-content.ts`; the test names the
+one you forgot. `src/utils/docs-page.test.ts` covers the renderer itself:
+unique anchors, escaping (no raw mention token, exactly one `<script>` element),
+and both branches of the endpoint (`GET` → the page, anything else → `405` with
+`Allow`).
+
 ## Linked Channels (`/linked-channel`)
 
 Example implementation of Discord Social SDK **Linked Channels** over the HTTP
@@ -304,6 +348,7 @@ and the test message:
 | The Activity | `/activity` (or launch it from the server's Activity list) | **Dog Run** — space to jump, ↓ to duck — and, inside Discord, your name and record |
 | What Discord tells your app | **Webhooks** page + `GET /api/diag` → `recentEvents` | `PING` when the URL is saved, then one line per subscribed event |
 | The link itself | `/api/diag?guild=<id>` → `lobbyState` | The stored lobby's live state and its `linkedChannelId` |
+| How any of it works, and how to call it | `/docs` | The whole reference: commands, components, endpoints, and every exported function |
 
 So the shortest end-to-end check is: `/linked-channel` → **Link a channel** →
 pick a channel → **Link anyway** → **✉️ Test all linked channels**, and watch your
