@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Mini App — Message every linked channel</title>
+		<style>
+			:root {
+				--bg: #1e1f22;
+				--surface: #2b2d31;
+				--surface-2: #313338;
+				--border: #3f4147;
+				--text: #dbdee1;
+				--muted: #949ba4;
+				--accent: #5865f2;
+				--accent-hover: #4752c4;
+				--ok: #23a55a;
+				--warn: #f0b232;
+				--bad: #f23f43;
+			}
+
+			* {
+				box-sizing: border-box;
+			}
+
+			body {
+				margin: 0;
+				min-height: 100vh;
+				display: flex;
+				align-items: flex-start;
+				justify-content: center;
+				padding: 40px 20px 64px;
+				background:
+					radial-gradient(1000px 420px at 50% -180px, rgba(88, 101, 242, 0.22), transparent 70%),
+					var(--bg);
+				color: var(--text);
+				font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+				font-size: 15px;
+				line-height: 1.5;
+			}
+
+			main {
+				width: 100%;
+				max-width: 620px;
+			}
+
+			.badge {
+				display: inline-block;
+				padding: 4px 10px;
+				border-radius: 999px;
+				background: rgba(88, 101, 242, 0.16);
+				border: 1px solid rgba(88, 101, 242, 0.4);
+				color: #b7c0ff;
+				font-size: 12px;
+				font-weight: 600;
+				letter-spacing: 0.04em;
+				text-transform: uppercase;
+			}
+
+			h1 {
+				margin: 14px 0 6px;
+				font-size: 27px;
+				line-height: 1.25;
+				color: #fff;
+			}
+
+			.lede {
+				margin: 0;
+				color: var(--muted);
+			}
+
+			.card {
+				margin-top: 22px;
+				padding: 20px;
+				background: var(--surface);
+				border: 1px solid var(--border);
+				border-radius: 14px;
+				box-shadow: 0 18px 40px rgba(0, 0, 0, 0.28);
+			}
+
+			.reach {
+				margin-bottom: 18px;
+				padding-bottom: 16px;
+				border-bottom: 1px solid var(--border);
+			}
+
+			.reach-head {
+				margin: 0 0 10px;
+				font-size: 12px;
+				font-weight: 700;
+				letter-spacing: 0.06em;
+				text-transform: uppercase;
+				color: var(--muted);
+			}
+
+			.chips {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 6px;
+			}
+
+			.chip {
+				padding: 4px 9px;
+				border-radius: 8px;
+				background: var(--surface-2);
+				border: 1px solid var(--border);
+				color: var(--text);
+				font-size: 13px;
+				font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+			}
+
+			label {
+				display: block;
+				margin-bottom: 6px;
+				font-size: 13px;
+				font-weight: 600;
+				color: var(--muted);
+			}
+
+			input,
+			textarea {
+				width: 100%;
+				padding: 11px 12px;
+				background: var(--bg);
+				color: var(--text);
+				border: 1px solid var(--border);
+				border-radius: 10px;
+				font: inherit;
+			}
+
+			textarea {
+				min-height: 118px;
+				resize: vertical;
+			}
+
+			input:focus-visible,
+			textarea:focus-visible {
+				outline: none;
+				border-color: var(--accent);
+				box-shadow: 0 0 0 3px rgba(88, 101, 242, 0.28);
+			}
+
+			.field + .field {
+				margin-top: 14px;
+			}
+
+			.row {
+				display: flex;
+				align-items: center;
+				justify-content: space-between;
+				gap: 12px;
+				margin-top: 16px;
+			}
+
+			.counter {
+				color: var(--muted);
+				font-size: 12px;
+				font-variant-numeric: tabular-nums;
+			}
+
+			.counter.over {
+				color: var(--bad);
+				font-weight: 700;
+			}
+
+			button {
+				padding: 11px 20px;
+				background: var(--accent);
+				color: #fff;
+				border: 0;
+				border-radius: 10px;
+				font: inherit;
+				font-weight: 600;
+				cursor: pointer;
+			}
+
+			button:hover:not(:disabled) {
+				background: var(--accent-hover);
+			}
+
+			button:disabled {
+				opacity: 0.55;
+				cursor: default;
+			}
+
+			#result {
+				margin-top: 18px;
+			}
+
+			#result:empty {
+				margin-top: 0;
+			}
+
+			.result-head {
+				margin: 0 0 10px;
+				font-weight: 600;
+			}
+
+			.result-list {
+				margin: 0;
+				padding: 0;
+				list-style: none;
+				display: grid;
+				gap: 6px;
+			}
+
+			.result-list li {
+				display: flex;
+				gap: 8px;
+				align-items: baseline;
+				padding: 8px 10px;
+				background: var(--surface-2);
+				border: 1px solid var(--border);
+				border-radius: 9px;
+				font-size: 14px;
+			}
+
+			.result-list .name {
+				font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+				color: #fff;
+			}
+
+			.result-list .why {
+				color: var(--muted);
+				font-size: 13px;
+			}
+
+			.note {
+				margin: 8px 0 0;
+				color: var(--muted);
+				font-size: 13px;
+			}
+
+			.ok {
+				color: var(--ok);
+			}
+
+			.warn {
+				color: var(--warn);
+			}
+
+			.bad {
+				color: var(--bad);
+			}
+
+			footer {
+				margin-top: 18px;
+				color: var(--muted);
+				font-size: 12.5px;
+			}
+
+			a {
+				color: #b7c0ff;
+			}
+		</style>
+	</head>
+	<body>
+		<main>
+			<span class="badge">Web → Discord</span>
+			<h1>Send a message to every linked channel</h1>
+			<p class="lede">
+				Type below and it is posted into every channel this app has linked — across all
+				servers at once, by the app's bot.
+			</p>
+
+			<section class="card">
+				<div class="reach">
+					<p class="reach-head">Currently reaches</p>
+					<div class="chips" id="chips"><span class="chip">loading…</span></div>
+				</div>
+
+				<form id="form" novalidate>
+					<div class="field">
+						<label for="name">Your name <span style="font-weight: 400">(optional)</span></label>
+						<input id="name" name="name" maxlength="32" placeholder="Anonymous" autocomplete="nickname" />
+					</div>
+
+					<div class="field">
+						<label for="text">Message</label>
+						<textarea
+							id="text"
+							name="text"
+							placeholder="What should every channel hear?"
+							required
+							aria-describedby="counter"
+						></textarea>
+					</div>
+
+					<div class="row">
+						<span class="counter" id="counter">0 / 500</span>
+						<button type="submit" id="send">Send to every channel</button>
+					</div>
+				</form>
+
+				<p class="note">
+					Delivered by the app's bot. Mentions (<code>@everyone</code>, roles) are
+					disabled, so a message here can never ping anyone.
+				</p>
+			</section>
+
+			<div id="result" aria-live="polite"></div>
+
+			<footer>
+				Up to 5 messages per minute per visitor.
+				<a href="/api/diag">/api/diag</a> reports which channels are linked.
+			</footer>
+		</main>
+
+		<script>
+			const LIMIT = 500;
+			const form = document.getElementById("form");
+			const nameInput = document.getElementById("name");
+			const textInput = document.getElementById("text");
+			const counter = document.getElementById("counter");
+			const send = document.getElementById("send");
+			const chips = document.getElementById("chips");
+			const result = document.getElementById("result");
+
+			/** Channel names, so the results can point at names not snowflakes. */
+			const names = new Map();
+
+			function label(channelId) {
+				return names.get(channelId) || channelId;
+			}
+
+			function renderChips(channels) {
+				chips.textContent = "";
+				if (channels.length === 0) {
+					const empty = document.createElement("span");
+					empty.className = "chip";
+					empty.textContent = "nothing yet — link a channel with /linked-channel";
+					chips.append(empty);
+					send.disabled = true;
+					return;
+				}
+				for (const channel of channels) {
+					const chip = document.createElement("span");
+					chip.className = "chip";
+					chip.textContent = channel.name ? "#" + channel.name : channel.channelId;
+					chips.append(chip);
+				}
+			}
+
+			function renderResult(heading, tone, lines) {
+				result.textContent = "";
+				const head = document.createElement("p");
+				head.className = "result-head " + tone;
+				head.textContent = heading;
+				result.append(head);
+
+				if (lines.length === 0) return;
+				const list = document.createElement("ul");
+				list.className = "result-list";
+				for (const line of lines) {
+					const item = document.createElement("li");
+					const icon = document.createElement("span");
+					icon.textContent = line.icon;
+					const name = document.createElement("span");
+					name.className = "name";
+					name.textContent = line.name;
+					item.append(icon, name);
+					if (line.why) {
+						const why = document.createElement("span");
+						why.className = "why";
+						why.textContent = line.why;
+						item.append(why);
+					}
+					list.append(item);
+				}
+				result.append(list);
+			}
+
+			textInput.addEventListener("input", () => {
+				const used = textInput.value.trim().length;
+				counter.textContent = used + " / " + LIMIT;
+				counter.classList.toggle("over", used > LIMIT);
+			});
+
+			fetch("/api/message")
+				.then((response) => response.json())
+				.then((data) => {
+					for (const channel of data.channels || []) {
+						if (channel.name) names.set(channel.channelId, "#" + channel.name);
+					}
+					renderChips(data.channels || []);
+				})
+				.catch(() => {
+					chips.textContent = "";
+					const chip = document.createElement("span");
+					chip.className = "chip";
+					chip.textContent = "could not load the linked channels";
+					chips.append(chip);
+				});
+
+			form.addEventListener("submit", async (event) => {
+				event.preventDefault();
+				send.disabled = true;
+				send.textContent = "Sending…";
+				renderResult("", "", []);
+
+				try {
+					const response = await fetch("/api/message", {
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({ name: nameInput.value, text: textInput.value }),
+					});
+					const data = await response.json();
+
+					if (!response.ok) {
+						renderResult(data.error || "Could not send the message.", "bad", []);
+						return;
+					}
+
+					const lines = (data.results || []).map((entry) => ({
+						icon: entry.ok ? "✅" : "❌",
+						name: label(entry.channelId),
+						why: entry.ok ? "posted" : entry.error || "failed",
+					}));
+					const all = data.sent === data.total;
+					renderResult(
+						all
+							? "Sent to all " + data.total + " linked channel" + (data.total === 1 ? "" : "s") + "."
+							: "Sent to " + data.sent + " of " + data.total + " linked channels.",
+						all ? "ok" : "warn",
+						lines,
+					);
+					if (all) textInput.value = "";
+				} catch (error) {
+					renderResult("Could not reach the server: " + error.message, "bad", []);
+				} finally {
+					send.disabled = false;
+					send.textContent = "Send to every channel";
+					counter.textContent = textInput.value.trim().length + " / " + LIMIT;
+				}
+			});
+		</script>
+	</body>
+</html>

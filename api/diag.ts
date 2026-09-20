@@ -524,6 +524,8 @@ export default async function handler(req: DiagRequest, res: DiagResponse): Prom
 		lobbyState,
 		links: {
 			botInvite: applicationId ? buildBotInviteUrl(applicationId) : null,
+			// The web app: type a message, it goes to every linked channel.
+			messagePage: hostHeader ? `https://${hostHeader}/message` : null,
 			// The exact URL to paste on the app's Webhooks page. Derived from the
 			// request, so a preview deployment reports its own host.
 			eventsUrl: buildEventsUrl(

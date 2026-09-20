@@ -9,6 +9,7 @@ import {
 	LobbyCallTimeoutError,
 	describeLobbyError,
 	linkChannelToLobby,
+	sendChannelMessage,
 	setLobbyCallTimeoutMs,
 	setLobbyFetchImplementation,
 	withTimeout,
@@ -141,6 +142,26 @@ test("a stalled transport surfaces as LobbyCallTimeoutError, not a hang", async 
 		setLobbyCallTimeoutMs(LOBBY_CALL_TIMEOUT_MS);
 		setLobbyFetchImplementation(undefined);
 	}
+});
+
+test("a bot channel message disables mention parsing", async () => {
+	// The web app (`api/message.ts`) posts text written by whoever has the link.
+	// A bot-owned message containing `@everyone` pings a whole server, so mention
+	// parsing is the one privilege that must not reach anonymous input — this
+	// pins it at the call rather than trusting every caller to remember.
+	let sent: Record<string, unknown> = {};
+	setLobbyFetchImplementation((async (_url: string, init: RequestInit) => {
+		sent = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+		return jsonResponse(200, { id: "1" });
+	}) as never);
+	try {
+		await sendChannelMessage("1525905982000070780", "hi @everyone");
+	} finally {
+		setLobbyFetchImplementation(undefined);
+	}
+
+	assert.deepEqual(sent.allowed_mentions, { parse: [] });
+	assert.equal(sent.content, "hi @everyone", "the text itself is not rewritten — only its mentions");
 });
 
 test("describeLobbyError explains timeouts and Discord's own errors", () => {
