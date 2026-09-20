@@ -293,8 +293,10 @@
 				</form>
 
 				<p class="note">
-					Delivered by the app's bot. Mentions (<code>@everyone</code>, roles) are
-					disabled, so a message here can never ping anyone.
+					Delivered through each server's game lobby when its member has connected
+					the app, otherwise posted by the app's bot. Mentions
+					(<code>@everyone</code>, roles) are disabled on both paths, so a message
+					here can never ping anyone.
 				</p>
 			</section>
 
@@ -341,12 +343,19 @@
 				}
 			}
 
-			function renderResult(heading, tone, lines) {
+			function renderResult(heading, tone, lines, note) {
 				result.textContent = "";
 				const head = document.createElement("p");
 				head.className = "result-head " + tone;
 				head.textContent = heading;
 				result.append(head);
+
+				if (note) {
+					const sub = document.createElement("p");
+					sub.className = "note";
+					sub.textContent = note;
+					result.append(sub);
+				}
 
 				if (lines.length === 0) return;
 				const list = document.createElement("ul");
@@ -407,23 +416,47 @@
 					const data = await response.json();
 
 					if (!response.ok) {
-						renderResult(data.error || "Could not send the message.", "bad", []);
-						return;
-					}
+					renderResult(data.error || "Could not send the message.", "bad", []);
+					return;
+				}
 
-					const lines = (data.results || []).map((entry) => ({
-						icon: entry.ok ? "✅" : "❌",
-						name: label(entry.channelId),
-						why: entry.ok ? "posted" : entry.error || "failed",
+				const results = data.results || [];
+				const lines = results.map((entry) => ({
+					icon: entry.ok ? "✅" : "❌",
+					name: label(entry.channelId),
+					why: !entry.ok
+						? entry.error || "failed"
+						: entry.delivery === "lobby"
+							? "via the game lobby"
+							: entry.lobbyFallback
+								? "via the bot — " + entry.lobbyFallback
+								: "via the bot",
 					}));
-					const all = data.sent === data.total;
-					renderResult(
-						all
-							? "Sent to all " + data.total + " linked channel" + (data.total === 1 ? "" : "s") + "."
-							: "Sent to " + data.sent + " of " + data.total + " linked channels.",
-						all ? "ok" : "warn",
-						lines,
-					);
+
+				// Which path each channel took is the difference between "a game session
+				// is live" and "the bot covered it", so it is spelled out rather than
+				// left for the reader to infer from two icons.
+				const viaLobby = results.filter((entry) => entry.ok && entry.delivery === "lobby").length;
+				const viaBot = results.filter((entry) => entry.ok && entry.delivery === "channel").length;
+				const note =
+					viaBot === 0
+						? "Every channel received it through its game lobby."
+						: viaLobby === 0
+							? "Every channel received it from the app's bot."
+							: viaLobby +
+								" through the game lobby, " +
+								viaBot +
+								" from the app's bot.";
+
+				const all = data.sent === data.total;
+				renderResult(
+					all
+						? "Sent to all " + data.total + " linked channel" + (data.total === 1 ? "" : "s") + "."
+						: "Sent to " + data.sent + " of " + data.total + " linked channels.",
+					all ? "ok" : "warn",
+					lines,
+					note,
+				);
 					if (all) textInput.value = "";
 				} catch (error) {
 					renderResult("Could not reach the server: " + error.message, "bad", []);

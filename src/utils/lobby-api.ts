@@ -33,6 +33,8 @@
  */
 
 import { DiscordRestClient, DiscordRestApiError } from "@minesa-org/mini-interaction";
+
+import { neutraliseMentions } from "./mentions.ts";
 import type {
 	APILobby,
 	APILobbyInvite,
@@ -224,10 +226,16 @@ export function sendChannelMessage(
  * `sdk.social_layer`).
  *
  * This is the call a game makes from inside the Social SDK: the message lands
- * in the lobby's linked channel and is what the panel's "Send a test message"
- * button exercises, so the linked-channel path can be checked without a game
- * client. Requires a linked channel and a lobby membership carrying the Social
- * SDK flags.
+ * in the lobby's linked channel and is what the panel's "Test all linked
+ * channels" button exercises, so the linked-channel path can be checked without
+ * a game client. Requires a linked channel and a lobby membership carrying the
+ * Social SDK flags.
+ *
+ * **Mentions are neutralised in the content** (`neutraliseMentions`): this route
+ * accepts no `allowed_mentions`, the message is posted as the member's own
+ * account, and the web app (`api/message.ts`) sends text written by whoever has
+ * the link — so the text has to be unable to form a mention token at all. See
+ * `src/utils/mentions.ts` for why that guard is not a backslash.
  */
 export function sendLobbyMessage(
 	lobbyId: string,
@@ -235,7 +243,9 @@ export function sendLobbyMessage(
 	userToken: string,
 ): Promise<{ id: string }> {
 	return call("post into the lobby", (client) =>
-		client.sendLobbyMessage(lobbyId, { content }, userToken) as Promise<{ id: string }>,
+		client.sendLobbyMessage(lobbyId, { content: neutraliseMentions(content) }, userToken) as Promise<{
+			id: string;
+		}>,
 	);
 }
 

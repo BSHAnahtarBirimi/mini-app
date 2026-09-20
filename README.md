@@ -29,6 +29,7 @@ endpoint file.
 | `src/utils/webhook-events.ts` | Webhook Events router + the deauthorize → linked-channel notice |
 | `src/utils/lobby-broadcast.ts` | One message, sent into **every** linked channel, with a per-channel result (bot or user token) |
 | `src/utils/web-message.ts` | What the web app accepts, and how it is composed for Discord (pure) |
+| `src/utils/mentions.ts` | Makes text unable to ping anyone, for the path with no `allowed_mentions` |
 | `src/utils/web-rate-limit.ts` | Per-visitor message quota (pure window + `MiniDatabase` store) |
 | `src/utils/event-log.ts` | Received events, kept for `/api/diag` and for retry dedupe |
 | `src/utils/lobby-api.ts` | Lobby API wrappers over the package's `DiscordRestClient` (fail-fast: `maxRetries: 0`) |
@@ -317,9 +318,11 @@ each. Three consequences are worth knowing before you design around it:
 - **A lobby does not have to be alive to post.** The *notice* path
   (`APPLICATION_DEAUTHORIZED`) posts with the **bot** token straight into the
   channel, using the channel remembered on the guild's record, so a lobby
-  Discord has already reaped cannot swallow it. Only the *test* button goes
-  through a lobby, because that is the call a game makes; a reaped lobby there is
-  reported as `404` with what to do about it.
+  Discord has already reaped cannot swallow it. The *test* button goes through a
+  lobby, because that is the call a game makes, and a reaped lobby there is
+  reported as `404` with what to do about it. The *web app* uses both: lobby
+  first, bot as the fallback (see [Lobby first, bot as the safety
+  net](#lobby-first-bot-as-the-safety-net)).
 
 ### Why the channel is remembered
 
@@ -334,8 +337,32 @@ is the failure this field exists to prevent.
 ### The web app (`/message`)
 
 `public/message.html` is a page anyone with the link can use: they type a name and
-a message, and it is posted into **every** linked channel by the app's bot.
-`api/message.ts` is what the page talks to.
+a message, and it is posted into **every** linked channel — **through each
+server's game lobby** when that server's member has a connected account, and into
+the channel as the app's **bot** when it cannot be. `api/message.ts` is what the
+page talks to.
+
+### Lobby first, bot as the safety net
+
+A message posted into a lobby is the call a Social SDK game makes, so a web
+visitor's message and a player's in-game message arrive the same way. The web app
+therefore sends per server (`sendToLinkedChannels`):
+
+1. **Through the lobby** — `POST /lobbies/{id}/messages` with the OAuth2 token of
+a member of *that server's* lobby (the `creatorId` on `lc:${guildId}`). One
+person's token cannot post into another server's lobby, which is why the token is
+looked up per server rather than once.
+2. **Into the channel as the bot** — when there is no usable token (never
+authorized, or without `openid sdk.social_layer`), or when the lobby call is
+refused. This matters because **a lobby is a session object**: Discord reaps it
+when idle, and a fresh one cannot inherit the old one's channel link (linking is
+capped at 20 calls / 2 h). So the lobby carries the message while a game session
+is live, and the bot guarantees it arrives when none is.
+
+Every result says which path was taken, and why the lobby was not used when it
+wasn't, so "via the bot" reads as *that lobby is idle* rather than as success.
+The page summarises it too (`2 through the game lobby`, `1 through the game
+lobby, 1 from the app's bot`).
 
 | Request | Answer |
 | --- | --- |
@@ -349,9 +376,13 @@ Rules, and why each exists:
   **5 messages per minute per IP** (`src/utils/web-rate-limit.ts`), counted in
   `MiniDatabase` because consecutive requests are served by different instances.
   A refusal is a `429` with `Retry-After`; `GET` is never limited.
-- **Mentions are disabled.** `sendChannelMessage` sends `allowed_mentions:
-  { parse: [] }`, so text typed by a stranger can never `@everyone` a server
-  through the bot.
+- **Mentions are disabled on both paths, differently.** The bot path sends
+  `allowed_mentions: { parse: [] }` (server-enforced). The lobby path has no such
+  field — the library's lobby send takes only `content`, `metadata` and `flags` —
+  and posts as the *member's* account, so the content is made structurally unable
+  to form a mention token instead: `@everyone` → `@\u200beveryone`,
+  `<@123>` → `<@\u200b123>` (`src/utils/mentions.ts`). A stranger can never ping a
+  server from this page, whichever path is used.
 - **The name is escaped and the body is quoted.** The attribution is the app's own
   markdown (`💬 **<name>** — sent from the web app`), so markdown metacharacters
   in the *name* are escaped and the *body* is rendered as a quote — neither can
