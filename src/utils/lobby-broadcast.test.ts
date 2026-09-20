@@ -2,8 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { DiscordRestApiError } from "./lobby-api.ts";
-import { broadcastToLinkedChannels, describeBroadcastOutcomes } from "./lobby-broadcast.ts";
-import type { BroadcastDeps } from "./lobby-broadcast.ts";
+import {
+	broadcastToLinkedChannels,
+	broadcastToLinkedChannelsAsBot,
+	describeBroadcastOutcomes,
+} from "./lobby-broadcast.ts";
+import type { BroadcastDeps, ChannelBroadcastDeps } from "./lobby-broadcast.ts";
 import type { LinkedChannelTarget } from "./webhook-events.ts";
 
 /**
@@ -101,6 +105,43 @@ test("all channels are posted into concurrently, so one slow lobby cannot starve
 	await broadcastToLinkedChannels("hello", "user-token", deps);
 
 	assert.ok(bStartedWhileAWasPending, "the second channel is attempted while the first is still in flight");
+});
+
+test("the bot broadcast reaches every channel and needs no lobby", async () => {
+	const sent: string[] = [];
+	const deps: ChannelBroadcastDeps = {
+		targets: async () => [target("a"), target("b"), target("c")],
+		send: async (channelId) => {
+			if (channelId === "b") {
+				throw new DiscordRestApiError(
+					403,
+					"POST",
+					"/channels/b/messages",
+					'{"message":"Missing Permissions"}',
+				);
+			}
+			sent.push(channelId);
+			return { id: `msg-${channelId}` };
+		},
+	};
+
+	const outcomes = await broadcastToLinkedChannelsAsBot("anyone's message", deps);
+
+	assert.deepEqual(
+		sent,
+		["a", "c"],
+		"a channel the bot cannot post in must not mute the ones after it",
+	);
+	assert.deepEqual(
+		outcomes.map((outcome) => outcome.ok),
+		[true, false, true],
+	);
+	assert.equal(outcomes[1]?.status, 403);
+	assert.equal(
+		"lobbyId" in (outcomes[0] ?? {}),
+		false,
+		"the bot posts straight into the channel, so a reaped lobby cannot hide it",
+	);
 });
 
 test("nothing linked yet is explained rather than reported as a failure", async () => {

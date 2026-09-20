@@ -194,16 +194,28 @@ export function createLobbyChannelInviteForSelf(
  * Sends a message to a channel as the bot (bot auth).
  *
  * Used by the `APPLICATION_DEAUTHORIZED` webhook event to tell the linked
- * channel that the account which set the link up is gone. The bot needs View
- * Channel + Send Messages there, which the app's own invite URL already
- * requests.
+ * channel that the account which set the link up is gone, and by the web app
+ * (`api/message.ts`) to broadcast a message somebody typed in a browser. The bot
+ * needs View Channel + Send Messages there, which the app's own invite URL
+ * already requests.
+ *
+ * Mention parsing is **off** unless `allowMentions` is set: a bot-owned message
+ * containing `@everyone` pings the whole server, and the web app carries text
+ * written by whoever has the link — that is exactly the privilege which must not
+ * be handed to anonymous input.
  */
 export function sendChannelMessage(
 	channelId: string,
 	content: string,
+	/** Set only for text the app itself wrote, which cannot contain a mention. */
+	allowMentions = false,
 ): Promise<{ id: string }> {
 	return call("post to the linked channel", (client) =>
-		client.sendMessage({ channelId, content }) as Promise<{ id: string }>,
+		client.sendMessage(
+			allowMentions
+				? { channelId, content }
+				: { channelId, content, allowedMentions: { parse: [] } },
+		) as Promise<{ id: string }>,
 	);
 }
 

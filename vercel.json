@@ -3,6 +3,10 @@
 		{
 			"source": "/",
 			"destination": "/api/index"
+		},
+		{
+			"source": "/message",
+			"destination": "/message.html"
 		}
 	],
 	"functions": {
@@ -19,6 +23,10 @@
 			"includeFiles": "src/**"
 		},
 		"api/diag.ts": {
+			"maxDuration": 15,
+			"includeFiles": "src/**"
+		},
+		"api/message.ts": {
 			"maxDuration": 15,
 			"includeFiles": "src/**"
 		},

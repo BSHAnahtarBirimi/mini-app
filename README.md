@@ -14,6 +14,8 @@ endpoint file.
 | `api/discord-oauth-callback.ts` | OAuth2 callback: stores tokens in `MiniDatabase`, updates role metadata |
 | `api/diag.ts` | Read-only diagnostics: bot token, guild membership, registered commands |
 | `api/discord-events.ts` | Webhook Events endpoint (PING, `APPLICATION_DEAUTHORIZED`, …) |
+| `public/message.html` | The web app at `/message`: type a message, it goes to every linked channel |
+| `api/message.ts` | `GET` = where a message would go, `POST` = post it into all of them (bot token) |
 | `src/commands/ping.ts` | `/ping` — Components V2 container + section + button |
 | `src/commands/echo.ts` | `/echo` — typed option resolver demo |
 | `src/components/ping_button.ts` | Button → modal with a modal-side select menu |
@@ -25,7 +27,9 @@ endpoint file.
 | `src/components/lc_*.ts` | Linked Channels flow components (`lc:link`, `lc:pick`, `lc:confirm`, `lc:cancel`, `lc:unlink`, `lc:join`, `lc:test`) |
 | `src/utils/authorize-panel.ts` | The `/authorize` message: connection status + the consent link |
 | `src/utils/webhook-events.ts` | Webhook Events router + the deauthorize → linked-channel notice |
-| `src/utils/lobby-broadcast.ts` | One message, sent into **every** linked channel, with a per-channel result |
+| `src/utils/lobby-broadcast.ts` | One message, sent into **every** linked channel, with a per-channel result (bot or user token) |
+| `src/utils/web-message.ts` | What the web app accepts, and how it is composed for Discord (pure) |
+| `src/utils/web-rate-limit.ts` | Per-visitor message quota (pure window + `MiniDatabase` store) |
 | `src/utils/event-log.ts` | Received events, kept for `/api/diag` and for retry dedupe |
 | `src/utils/lobby-api.ts` | Lobby API wrappers over the package's `DiscordRestClient` (fail-fast: `maxRetries: 0`) |
 | `src/utils/lobby-store.ts` | Per-guild lobby records on `MiniDatabase` (`lc:${guildId}`) + a guild index used as a fallback when enumerating them |
@@ -327,6 +331,41 @@ lobby happened to be idle at that moment was dropped from the broadcast in
 silence: the message arrived in one channel and nothing anywhere said why. That
 is the failure this field exists to prevent.
 
+### The web app (`/message`)
+
+`public/message.html` is a page anyone with the link can use: they type a name and
+a message, and it is posted into **every** linked channel by the app's bot.
+`api/message.ts` is what the page talks to.
+
+| Request | Answer |
+| --- | --- |
+| `GET /api/message` | `{ ok, total, channels: [{ guildId, channelId, name }] }` — where a message would go, names resolved with the bot token |
+| `POST /api/message` `{ name, text }` | `{ ok, sent, total, results: [{ channelId, ok, messageId \| error }] }` |
+
+Rules, and why each exists:
+
+- **Open, rate-limited, not authenticated.** There are no accounts here and
+  nothing in the endpoint is a secret, so the limit is what protects your servers:
+  **5 messages per minute per IP** (`src/utils/web-rate-limit.ts`), counted in
+  `MiniDatabase` because consecutive requests are served by different instances.
+  A refusal is a `429` with `Retry-After`; `GET` is never limited.
+- **Mentions are disabled.** `sendChannelMessage` sends `allowed_mentions:
+  { parse: [] }`, so text typed by a stranger can never `@everyone` a server
+  through the bot.
+- **The name is escaped and the body is quoted.** The attribution is the app's own
+  markdown (`💬 **<name>** — sent from the web app`), so markdown metacharacters
+  in the *name* are escaped and the *body* is rendered as a quote — neither can
+  forge a second speaker inside the app's formatting.
+- **A partial delivery is reported as one.** Every channel's own result is
+  returned, so a server the bot cannot post in shows `❌ 403` for that channel
+  instead of being indistinguishable from success.
+
+What it needs from Discord: the bot must be **in each server**, with **View
+Channel + Send Messages** in the linked channel. That is the same requirement the
+deauthorize notice has, and it is why the page posts with the bot token rather
+than a user token — a visitor needs no Discord account, and no lobby has to be
+alive.
+
 ### Package version note
 
 Built on `@minesa-org/mini-interaction` **v0.14.0**, which ships the full Lobby
@@ -464,6 +503,7 @@ names Discord already shows to everyone):
 | `filesystem` (`?fs=1`) | The function's `cwd` and which runtime paths actually exist |
 | `links.botInvite` | Invite URL with `scope=bot+applications.commands` |
 | `links.eventsUrl` | The exact URL to paste on the Developer Portal's Webhooks page |
+| `links.messagePage` | The web app that posts a message into every linked channel |
 
 ```bash
 curl "https://<your-app>/api/diag"
