@@ -4,7 +4,7 @@
  * `GET`  reports where a message would go: every linked channel this app
  *        maintains, with the channel's name resolved with the bot token so the
  *        page can say `#genel` instead of a snowflake.
- * `POST` takes `{ name, text }` and posts it into **all** of those channels,
+ * `POST` takes `{ text }` and posts it into **all** of those channels,
  *        **through each server's lobby** when that server's member has a stored
  *        connection with `sdk.social_layer` — the same call a Social SDK game
  *        makes, so a web message and a player's message arrive the same way —
@@ -20,6 +20,9 @@
  *   minute). Nothing here is a secret and the app has no user accounts, so the
  *   limit — not authentication — is what keeps one visitor from flooding every
  *   server the app is in.
+ * - **The message is posted exactly as written** (`checkWebMessage`): no
+ *   attribution line, no quote, no name field. Nothing of the app's voice wraps
+ *   text the app did not write, so there is nothing to forge either.
  * - **Mentions are off on both paths.** The bot path sends `allowed_mentions:
  *   { parse: [] }`; the lobby path has no such option, so the content is made
  *   unable to form a mention token (`neutraliseMentions`). A stranger can never
@@ -216,7 +219,7 @@ export async function handleMessage(
 	}
 
 	const body = await readBody(req);
-	const checked = checkWebMessage({ name: body.name, text: body.text });
+	const checked = checkWebMessage({ text: body.text });
 	if (!checked.ok) {
 		sendJson(res, checked.status, { ok: false, error: checked.error, limit: MAX_MESSAGE_LENGTH });
 		return;

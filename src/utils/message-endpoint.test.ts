@@ -129,17 +129,17 @@ test("a refused channel lookup still lists the channel", async () => {
 	);
 });
 
-test("POST posts the composed message into every linked channel", async () => {
+test("POST posts the message, as written, into every linked channel", async () => {
 	const { deps, posted } = recordingDeps();
 	const res = await call(
-		{ method: "POST", headers: { "x-forwarded-for": "203.0.113.7" }, body: { name: "Neo", text: "hello all" } },
+		{ method: "POST", headers: { "x-forwarded-for": "203.0.113.7" }, body: { text: "hello all" } },
 		deps,
 	);
 
 	assert.equal(res.statusCode, 200);
 	assert.equal(json(res).sent, 2);
 	assert.equal(json(res).total, 2);
-	assert.deepEqual(posted, ["💬 **Neo** — sent from the web app\n> hello all"]);
+	assert.deepEqual(posted, ["hello all"], "the text is what goes out — nothing is wrapped around it");
 	assert.deepEqual(
 		(json(res).results as { messageId?: string }[]).map((entry) => entry.messageId),
 		["msg-1525905982000070780", "msg-1550970323917340694"],

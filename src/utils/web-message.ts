@@ -1,66 +1,36 @@
 /**
  * What the web app (`public/message.html` → `api/message.ts`) accepts, and how
- * it is turned into the message Discord receives.
+ * it turns that into the message Discord receives.
  *
  * The endpoint is deliberately open — anyone with the link may post, and the
  * message goes to **every** linked channel — so the rules that stand between a
  * stranger's input and the app's servers live here, as pure functions, where
  * they can be tested without a deployment:
  *
- * - **Length is bounded.** Discord caps a message at 2000 characters and the
- *   quoted body plus the attribution has to fit; 500 for the body keeps a long
- *   paste from filling a channel and is reported as such rather than truncated
- *   silently.
- * - **The attribution cannot be forged.** The author's name is rendered in bold
- *   and the body as a quote, so markdown metacharacters in the *name* are
- *   escaped — otherwise a name of `**Admin**` or a leading `>` forges a second
- *   speaker inside the app's own formatting.
- * - **Mentions are not part of this.** `sendChannelMessage` disables mention
- *   parsing (`allowed_mentions: { parse: [] }`) because a bot-owned message
- *   containing `@everyone` pings a whole server. The text is passed through
- *   untouched here; the privilege is removed at the call.
+ * - **The text is posted as written.** No attribution line, no quote, no
+ *   formatting added by the app: what the sender typed is what every channel
+ *   receives. There is also no name field, so the old risk — a name rendered in
+ *   the app's own bold run, which could be escaped but never truly trusted — is
+ *   gone by construction. Nothing of the app's voice surrounds the message, so
+ *   nothing of the app's voice can be forged.
+ * - **Length is bounded.** Discord caps a message at 2000 characters; 500 keeps
+ *   a long paste from filling a channel across every server at once, and the
+ *   refusal says how long the message was rather than truncating in silence.
+ * - **Mentions are not handled here.** They are removed at the call, and
+ *   differently per path, because the two paths have different controls: the
+ *   bot path sends `allowed_mentions: { parse: [] }` (server-enforced), and the
+ *   lobby path has no such field and posts as the member's account, so the
+ *   content itself is made unable to form a mention token
+ *   (`src/utils/mentions.ts`). The text is passed through untouched here.
  */
 
 /** Longest accepted message body. */
 export const MAX_MESSAGE_LENGTH = 500;
 
-/** Longest accepted display name. */
-export const MAX_NAME_LENGTH = 32;
-
-/** Used when no name is given — never an empty attribution. */
-export const DEFAULT_NAME = "A web visitor";
-
-/** Result of checking a submission: either the composed message, or why not. */
+/** Result of checking a submission: either the message, or why it was refused. */
 export type WebMessageCheck =
-	| { ok: true; name: string; text: string; content: string }
+	| { ok: true; text: string; content: string }
 	| { ok: false; status: number; error: string };
-
-/**
- * Escapes Discord markdown metacharacters.
- *
- * Backslashes first, or the escapes added below would themselves be escaped.
- */
-export function escapeMarkdown(value: string): string {
-	return value
-		.replace(/\\/g, "\\\\")
-		.replace(/([*_~`|>])/g, "\\$1");
-}
-
-/**
- * A display name that cannot break out of the app's formatting: one line, no
- * control characters, no markdown, at most {@link MAX_NAME_LENGTH} characters.
- */
-export function cleanName(raw: unknown): string {
-	if (typeof raw !== "string") return DEFAULT_NAME;
-	const name = escapeMarkdown(
-		raw
-			// Control characters (including newlines) would break the layout.
-			.replace(/[\u0000-\u001f\u007f]/g, " ")
-			.replace(/\s+/g, " ")
-			.trim(),
-	).slice(0, MAX_NAME_LENGTH);
-	return name === "" ? DEFAULT_NAME : name;
-}
 
 /** The message body: trimmed, and `null` when it is not usable text. */
 export function cleanText(raw: unknown): string | null {
@@ -70,23 +40,12 @@ export function cleanText(raw: unknown): string | null {
 }
 
 /**
- * The exact content posted into each linked channel.
+ * Validates one submission.
  *
- * Every line of the body is quoted, so the author's text cannot be read as the
- * app speaking, and line endings are normalised first so a stray `\r` cannot
- * break the quote block apart.
+ * `content` is what gets posted, and is the text itself — see the note at the
+ * top of this file for why the app adds nothing to it.
  */
-export function composeWebMessage(name: string, text: string): string {
-	const quoted = text
-		.replace(/\r\n?/g, "\n")
-		.split("\n")
-		.map((line) => `> ${line}`)
-		.join("\n");
-	return [`💬 **${name}** — sent from the web app`, quoted].join("\n");
-}
-
-/** Validates one submission and composes the message, or explains the refusal. */
-export function checkWebMessage(input: { name?: unknown; text?: unknown }): WebMessageCheck {
+export function checkWebMessage(input: { text?: unknown }): WebMessageCheck {
 	const text = cleanText(input.text);
 	if (text === null) {
 		return { ok: false, status: 400, error: "Write a message first — the box is empty." };
@@ -99,6 +58,5 @@ export function checkWebMessage(input: { name?: unknown; text?: unknown }): WebM
 		};
 	}
 
-	const name = cleanName(input.name);
-	return { ok: true, name, text, content: composeWebMessage(name, text) };
+	return { ok: true, text, content: text };
 }

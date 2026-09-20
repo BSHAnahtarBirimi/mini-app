@@ -7,6 +7,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+	ACTIVITY_GAME_PATH,
 	ACTIVITY_PAGE_PATH,
 	ACTIVITY_SCRIPT_PATH,
 	ACTIVITY_SDK_PATH,
@@ -22,30 +23,39 @@ import {
  * here rather than trusted:
  *
  * 1. **The page is never empty.** It ships a visible starting state, so a frame
- *    whose script never runs still says what it is and what to check.
- * 2. **Every asset it references exists in the repository.** These are static
- *    files in `public/` served from the deployment root; the Discord proxy only
- *    forwards the paths the URL mapping covers, so a typo or a vendored directory
- *    that was never committed is indistinguishable from a broken app.
+ *   whose script never runs still says what it is and what to check.
+ * 2. **Every module the page loads exists in the repository**, including the ones
+ *   only reachable through an import (`activity.js` → `dog-runner.js` and the
+ *   SDK). These are static files in `public/`, and the Discord proxy only
+ *   forwards the paths the URL mapping covers, so a typo or a directory that was
+ *   never committed is indistinguishable from a broken app.
  */
 
 const projectRoot = fileURLToPath(new URL("../../", import.meta.url));
 const publicDir = path.join(projectRoot, "public");
 
-/** The file a root-relative URL like `/vendor/x.mjs` is served from. */
+/** The file a public URL like `/vendor/x.mjs` is served from. */
 function publicFile(url: string): string {
 	return path.join(publicDir, url.replace(/^\//, ""));
 }
 
-/** Every relative module specifier in a file, resolvable from its directory. */
-async function relativeImportsOf(file: string): Promise<string[]> {
+/** The file a module specifier resolves to, from the file that contains it. */
+function resolveSpecifier(from: string, specifier: string): string {
+	return specifier.startsWith("/")
+		? publicFile(specifier)
+		: path.resolve(path.dirname(from), specifier);
+}
+
+/** Every module specifier in a file, with where it resolves to. */
+async function importsOf(file: string): Promise<{ specifier: string; resolved: string }[]> {
 	const source = await readFile(file, "utf8");
-	const specifiers = new Set<string>();
+	const found = new Set<string>();
 	for (const match of source.matchAll(/(?:from|import)\s*["']([^"']+)["']/g)) {
-		const specifier = match[1];
-		if (specifier.startsWith(".")) specifiers.add(specifier);
+		found.add(match[1]);
 	}
-	return [...specifiers].map((specifier) => path.resolve(path.dirname(file), specifier));
+	return [...found]
+		.filter((specifier) => specifier.startsWith(".") || specifier.startsWith("/"))
+		.map((specifier) => ({ specifier, resolved: resolveSpecifier(file, specifier) }));
 }
 
 /** Walks a module graph and returns every file it reaches. */
@@ -56,8 +66,8 @@ async function moduleGraph(entry: string): Promise<string[]> {
 		const file = queue.pop() as string;
 		if (seen.has(file)) continue;
 		seen.add(file);
-		for (const dependency of await relativeImportsOf(file)) {
-			if (!seen.has(dependency)) queue.push(dependency);
+		for (const { resolved } of await importsOf(file)) {
+			if (!seen.has(resolved)) queue.push(resolved);
 		}
 	}
 	return [...seen];
@@ -69,11 +79,16 @@ test("the Activity shell always has something to show", () => {
 	// A visible status element with initial text: the difference between "the
 	// frame is loading" and a blank rectangle.
 	assert.match(html, /id="status"[^>]*>[^<]+</);
-	assert.match(html, /id="app"/);
+	assert.match(html, /<canvas id="game"/, "the game has somewhere to draw");
 	assert.match(html, /id="fallback"/);
 	// The fallback has to say what to do, not just that something is wrong.
 	assert.match(html, /URL Mappings/);
 	assert.match(html, new RegExp(ACTIVITY_SCRIPT_PATH.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+	// The controls are advertised on the page: a game whose keys are a secret is
+	// an Activity nobody can play.
+	assert.match(html, /Space/);
+	assert.match(html, /jump/);
+	assert.match(html, /duck/);
 });
 
 test("the page references only assets that are committed", () => {
@@ -87,40 +102,54 @@ test("the page references only assets that are committed", () => {
 	}
 });
 
-test("the Activity script exists and loads the SDK from our own origin", async () => {
+test("the client script exists and loads the game and the SDK from our own origin", async () => {
 	const script = publicFile(ACTIVITY_SCRIPT_PATH);
 	assert.ok(existsSync(script), `${ACTIVITY_SCRIPT_PATH} is not in public/`);
 
 	const source = await readFile(script, "utf8");
+	const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 	assert.match(
 		source,
-		new RegExp(`from\\s*["']${ACTIVITY_SDK_PATH.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']`),
+		new RegExp(`from\\s*["']${escape(ACTIVITY_SDK_PATH)}["']`),
 		"the Activity must import the vendored SDK — a CDN import depends on Discord's frame CSP allowing it",
 	);
+	assert.match(
+		source,
+		new RegExp(`from\\s*["']${escape(ACTIVITY_GAME_PATH)}["']`),
+		"and the game module, which is where the rules live",
+	);
+
 	// The secret-bearing exchange is the server's job: the code and nothing else
 	// may cross into the frame.
 	assert.equal(source.includes("client_secret"), false);
 	assert.equal(source.includes("discord.com/api/oauth2/token"), false);
-	// The frame is recognised by being embedded, which is also how the page
-	// decides between "Activity" and "opened in a browser".
-	assert.match(source, /window\.parent/);
+
+	// The game starts before anything awaits, so no failure downstream can turn
+	// the frame blank; and authorization is explicitly allowed to fail.
+	assert.match(source, /startDogRunner\(/, "the game is started by the client");
+	assert.match(source, /try \{[\s\S]*startDogRunner/, "and starting it is guarded");
+	assert.match(source, /catch \(error\) \{\s*\/\/ Not fatal|catch \(error\) \{/, "identify has its own catch");
+	assert.match(source, /window\.parent/, "the frame is recognised by being embedded");
 });
 
-test("the vendored SDK is complete, not partially copied", async () => {
-	const entry = publicFile(ACTIVITY_SDK_PATH);
-	assert.ok(existsSync(entry), `${ACTIVITY_SDK_PATH} is missing — run \`npm run activity-vendor\``);
+test("every module the Activity loads exists, one import at a time", async () => {
+	const graph = await moduleGraph(publicFile(ACTIVITY_SCRIPT_PATH));
 
-	const graph = await moduleGraph(entry);
-	// 60+ modules: the SDK inlines zod, uuid, big-integer and friends as relative
-	// files, so a copy that stopped at the entry would still "exist" and still
-	// fail in the frame.
-	assert.ok(graph.length > 50, `expected the whole SDK graph, reached ${graph.length} modules`);
+	// `activity.js` → `dog-runner.js` → (no further imports), plus the whole
+	// vendored SDK: 60+ files, because the SDK inlines its dependencies.
+	const relative = graph.map((file) => path.relative(publicDir, file));
+	assert.ok(
+		relative.includes("dog-runner.js"),
+		`the game is not reachable from ${ACTIVITY_SCRIPT_PATH}: ${relative.join(", ")}`,
+	);
+	assert.ok(graph.length > 50, `expected the SDK graph too, reached ${graph.length} modules`);
 
 	const missing = graph.filter((file) => !existsSync(file));
 	assert.deepEqual(
 		missing.map((file) => path.relative(publicDir, file)),
 		[],
-		"these SDK modules are referenced but not vendored",
+		"these modules are imported but not present in public/",
 	);
 });
 
@@ -138,10 +167,12 @@ test("every vendored SDK file is committed, not merely present", async () => {
 		await readdir(path.join(publicDir, "vendor"), { recursive: true, withFileTypes: true })
 	)
 		.filter((entry) => entry.isFile())
-		.map((entry) => path
-			.relative(publicDir, path.join(entry.parentPath, entry.name))
-			.split(path.sep)
-			.join("/"))
+		.map((entry) =>
+			path
+				.relative(publicDir, path.join(entry.parentPath, entry.name))
+				.split(path.sep)
+				.join("/"),
+		)
 		.sort();
 
 	let tracked: string[];
@@ -169,10 +200,14 @@ test("every vendored SDK file is committed, not merely present", async () => {
 	);
 });
 
-test("the Activity is reachable in a browser too, for checking without Discord", () => {
+test("the game is playable outside Discord too, for checking without it", async () => {
 	// `/activity` is served by `api/index.ts` (see the rewrite in vercel.json), so
-	// the page and its assets can be verified with curl before anyone opens
-	// Discord — which is the only other place a blank frame could be diagnosed.
+	// the page, its assets and the game itself can all be opened in a browser —
+	// the only other place a blank frame could be diagnosed.
 	assert.equal(ACTIVITY_PAGE_PATH, "/activity");
-	assert.match(activityPage(), /Sending|Send to every linked|Starting the Activity/);
+	assert.equal(ACTIVITY_GAME_PATH, "/dog-runner.js");
+	assert.match(activityPage(), /Starting the Activity/);
+
+	const source = await readFile(publicFile(ACTIVITY_SCRIPT_PATH), "utf8");
+	assert.match(source, /Running outside Discord/, "and says so, rather than waiting for a parent");
 });

@@ -6,18 +6,20 @@
  * from disk answers `FUNCTION_INVOCATION_FAILED` (that crash cost a day). This is
  * rendered by `api/index.ts`, which owns `/` and `/activity`.
  *
- * The page is a shell: all behaviour lives in `public/activity.js`, which is
- * served statically and imports the Embedded App SDK from `/vendor/`. Two
- * consequences are deliberate:
+ * The page is a shell: the game lives in `public/dog-runner.js` and the
+ * Activity's own logic (SDK handshake, identity) in `public/activity.js`, both
+ * served statically. Two consequences are deliberate:
  *
  * 1. **It is never blank.** A Discord Activity that cannot start shows a white
- *    frame and nothing else — no error, no console access — which is exactly how
- *    a missing URL mapping presents itself. The shell ships a visible starting
- *    state and a plain-English fallback with the fix, so the worst case is a
- *    page that explains what to check.
- * 2. **The SDK and the script are same-origin paths**, not a CDN: Discord applies
+ *    frame and nothing else — no error, no console access — which is how a
+ *    missing URL mapping presents itself, and how the broken first version of
+ *    this page did. The shell ships a visible starting state plus a fallback that
+ *    names the fix, and it renders the game immediately rather than waiting on
+ *    anything: authorization happens behind it, and a failure to authorize
+ *    becomes a line of text next to a game that still plays.
+ * 2. **The SDK and the game are same-origin paths**, not a CDN: Discord applies
  *    its own Content-Security-Policy to the frame, and a dependency on a
- *    third-party host being allowed has no upside for a 460 KB static file.
+ *    third-party host being allowed has no upside for 460 KB of static ESM.
  */
 
 /** Where the Activity is served (and what a plain browser can open). */
@@ -25,6 +27,9 @@ export const ACTIVITY_PAGE_PATH = "/activity";
 
 /** The Activity's client script, a static file in `public/`. */
 export const ACTIVITY_SCRIPT_PATH = "/activity.js";
+
+/** The game itself — also a static file, and importable outside a browser. */
+export const ACTIVITY_GAME_PATH = "/dog-runner.js";
 
 /** The Embedded App SDK's entry module, vendored by `npm run activity-vendor`. */
 export const ACTIVITY_SDK_PATH = "/vendor/embedded-app-sdk/index.mjs";
@@ -44,9 +49,8 @@ const STYLE = [
  * The Activity shell.
  *
  * `#status` starts with text, so a frame whose script never loads still says
- * something; `#fallback` is the "nothing is happening" explanation, hidden until
- * the script decides it is needed (or left visible if no script runs at all —
- * `activity.js` hides it as its first action).
+ * something; `#fallback` is the "nothing is happening" explanation, hidden once
+ * the game is running (or left visible if no script runs at all).
  */
 export function activityPage(): string {
 	return `<!DOCTYPE html>
@@ -54,36 +58,47 @@ export function activityPage(): string {
 	<head>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<title>Mini App — Activity</title>
+		<title>Mini App — Dog Run</title>
 		<style>
 			body { ${STYLE} }
-			main { max-width: 620px; margin: 0 auto; padding: 20px }
-			h1 { font-size: 18px; margin: 0 0 4px }
-			.card { background: #2b2d31; border: 1px solid #1e1f22; border-radius: 10px; padding: 14px; margin-top: 12px }
+			main { max-width: 860px; margin: 0 auto; padding: 16px 16px 24px }
+			header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px }
+			h1 { font-size: 18px; margin: 0 }
+			#player { color: #a3a6aa; font-size: 13px }
+			#status { margin: 8px 0 0; font-size: 13px; min-height: 19px }
 			.muted { color: #a3a6aa }
+			#stage { position: relative; margin-top: 10px; border-radius: 12px; overflow: hidden; border: 1px solid #1e1f22 }
+			canvas { display: block; width: 100%; height: min(58vh, 320px); touch-action: none; background: #f7f7f8 }
+			.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 10px 0 0; color: #a3a6aa; font-size: 12.5px }
+			kbd { background: #1e1f22; border: 1px solid #3f4147; border-bottom-width: 2px; border-radius: 5px; padding: 1px 5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px }
+			#fallback { margin-top: 12px; padding: 14px; background: #2b2d31; border: 1px solid #1e1f22; border-radius: 10px }
 			code { background: #1e1f22; border-radius: 4px; padding: 1px 5px; font-size: 12px }
-			textarea { width: 100%; box-sizing: border-box; min-height: 84px; resize: vertical; background: #1e1f22; color: #dbdee1; border: 1px solid #1e1f22; border-radius: 8px; padding: 10px; font: inherit }
-			input { background: #1e1f22; color: #dbdee1; border: 1px solid #1e1f22; border-radius: 8px; padding: 8px 10px; font: inherit }
-			button { background: #5865f2; color: #fff; border: 0; border-radius: 8px; padding: 10px 16px; font: inherit; font-weight: 600; cursor: pointer }
-			button:disabled { opacity: 0.6; cursor: default }
-			ul { list-style: none; padding: 0; margin: 8px 0 0 }
-			li { padding: 3px 0 }
-			.ok { color: #23a55a }
-			.bad { color: #f23f43 }
-			.warn { color: #f0b232 }
+			ul { margin: 8px 0 0; padding-left: 18px }
+			li { margin-top: 4px }
 		</style>
 	</head>
 	<body>
 		<main>
-			<h1>💬 Send to every linked channel</h1>
+			<header>
+				<h1>🐶 Dog Run</h1>
+				<span id="player" class="muted">…</span>
+			</header>
 			<p id="status" class="muted">Starting the Activity…</p>
-			<div id="app"></div>
-			<div id="fallback" class="card">
+
+			<div id="stage"><canvas id="game" width="800" height="300"></canvas></div>
+
+			<div class="legend">
+				<span><kbd>Space</kbd> / <kbd>↑</kbd> / tap — jump a hydrant</span>
+				<span><kbd>↓</kbd> — duck a frisbee</span>
+				<span>High frisbees need nothing — just run.</span>
+			</div>
+
+			<div id="fallback">
 				<strong>This page is a Discord Activity.</strong>
 				<p class="muted" style="margin: 8px 0 0">
-					It has to be opened from Discord, where the client performs the authorization. If you
-					are seeing this <em>inside</em> Discord, the frame is not being served correctly —
-					check two things:
+					It plays outside Discord too (the buttons above all work), but the authorization
+					that names the player only happens inside. If you see this <em>inside</em>
+					Discord with no game, the frame is not being served correctly — check two things:
 				</p>
 				<ul class="muted">
 					<li>
@@ -92,13 +107,9 @@ export function activityPage(): string {
 					</li>
 					<li>2. That the app is installed in this server and you are a member of it.</li>
 				</ul>
-				<p class="muted" style="margin: 8px 0 0">
-					Outside Discord you can use the web app instead:
-					<code>https://mini-app-bshanahtarbirimi.vercel.app/message</code>
-				</p>
 			</div>
 			<noscript>
-				<p class="bad">This Activity needs JavaScript, which is disabled in this client.</p>
+				<p class="muted">This game needs JavaScript, which is disabled in this client.</p>
 			</noscript>
 		</main>
 		<script type="module" src="${ACTIVITY_SCRIPT_PATH}"></script>

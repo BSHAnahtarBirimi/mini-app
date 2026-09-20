@@ -109,7 +109,7 @@ test("the real commands directory registers cleanly — the payload Discord gets
 	assert.deepEqual(problems, [], "the shipped command list must be registrable");
 	assert.deepEqual(
 		commandPayloads(modules as never).map((payload) => (payload as { name?: string })?.name),
-		["authorize", "echo", "linked-channel", "slow", "test"],
+		["authorize", "echo", "linked-channel", "mesaj", "slow", "test"],
 		"every command is discovered exactly once",
 	);
 });

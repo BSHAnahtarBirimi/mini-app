@@ -14,10 +14,13 @@ endpoint file.
 | `api/discord-oauth-callback.ts` | OAuth2 callback: stores tokens in `MiniDatabase`, updates role metadata |
 | `api/diag.ts` | Read-only diagnostics: bot token, guild membership, registered commands |
 | `api/discord-events.ts` | Webhook Events endpoint (PING, `APPLICATION_DEAUTHORIZED`, …) |
-| `public/message.html` | The web app at `/message`: type a message, it goes to every linked channel |
-| `api/message.ts` | `GET` = where a message would go, `POST` = post it into all of them (bot token) |
-| `src/utils/activity-page.ts` | The Activity shell, rendered by `api/index.ts` (never a blank frame) |
-| `public/activity.js` | The Activity client: SDK handshake, authorization, then the same `/api/message` call |
+| `public/message.html` | The web app at `/message`: type a message, it goes to every linked channel — and you see your own copy of it |
+| `api/message.ts` | `GET` = where a message would go, `POST` = post it into all of them (lobby or bot) |
+| `src/commands/mesaj.ts` | `/mesaj` — the same broadcast from inside Discord |
+| `src/utils/mesaj-command.ts` | Its rules, reply wording and handler (pure + injectable) |
+| `src/utils/activity-page.ts` | The Activity shell — the new name for `/activity`, and for `/` when Discord loads it |
+| `public/activity.js` | The Activity client: starts the game first, identifies the player best-effort |
+| `public/dog-runner.js` | The game: a white dog endless runner, Dino-style (pure rules + canvas) |
 | `api/activity.ts` | `GET` = what the Activity needs to start, `POST` = exchange its authorization code |
 | `src/utils/activity-auth.ts` | Activity scopes + the server-side code → token exchange (holds the client secret) |
 | `public/vendor/embedded-app-sdk/` | Vendored Embedded App SDK browser build (`npm run activity-vendor`) |
@@ -296,6 +299,9 @@ and the test message:
 | The command itself, without typing anything | `GET /api/diag?command=authorize&user=<id>` | The reply `/authorize` would send — the link, and whether that connection is confirmed, incomplete or revoked |
 | A message going *through* the lobby | **✉️ Test all linked channels** on the panel (`lc:test`) | The message appears in **every** linked channel this app maintains — this is the call a game makes via `sendLobbyMessage` — and the reply names each channel with Discord's answer for it |
 | A lobby invite for a member | **🏠 Join Discord server** (`lc:join`) | A one-use `discord.gg` invite to the linked channel's server |
+| Sending a message from Discord | **`/mesaj metin:…`** in your server | The message in every linked channel (lobby first, bot as the fallback), and a private reply naming each channel and the path it took |
+| Sending a message from the web | `/message` | The same delivery, and your own copy of the message under **Your messages** |
+| The Activity | `/activity` (or launch it from the server's Activity list) | **Dog Run** — space to jump, ↓ to duck — and, inside Discord, your name and record |
 | What Discord tells your app | **Webhooks** page + `GET /api/diag` → `recentEvents` | `PING` when the URL is saved, then one line per subscribed event |
 | The link itself | `/api/diag?guild=<id>` → `lobbyState` | The stored lobby's live state and its `linkedChannelId` |
 
@@ -303,7 +309,8 @@ So the shortest end-to-end check is: `/linked-channel` → **Link a channel** �
 pick a channel → **Link anyway** → **✉️ Test all linked channels**, and watch your
 message arrive in the channel. A message posted in the channel by a real user
 posts *into* the lobby as well, which is why the linked channel is a two-way
-bridge once a game is connected.
+bridge once a game is connected. To check the *broadcast* instead — every linked
+channel at once — use `/mesaj` in Discord or the page at `/message`.
 
 ### How a message reaches every channel
 
@@ -341,11 +348,50 @@ is the failure this field exists to prevent.
 
 ### The web app (`/message`)
 
-`public/message.html` is a page anyone with the link can use: they type a name and
-a message, and it is posted into **every** linked channel — **through each
-server's game lobby** when that server's member has a connected account, and into
-the channel as the app's **bot** when it cannot be. `api/message.ts` is what the
-page talks to.
+`public/message.html` is a page anyone with the link can use: they type a message
+and it is posted into **every** linked channel — **through each server's game
+lobby** when that server's member has a connected account, and into the channel as
+the app's **bot** when it cannot be. `api/message.ts` is what the page talks to.
+
+The message is posted **exactly as written**: no attribution line, no quote, no
+name field. Nothing of the app's voice wraps text the app did not write, so there
+is also nothing left to forge (the old design named the sender in the app's own
+bold run, and had to escape a name that could close it). What the page *does* add
+is the sender's own copy: every message you send is listed under **Your messages**
+with the time and each channel's outcome, kept in `localStorage` so a reload does
+not lose it. A message that lands in other people's channels should be visible to
+the person who wrote it.
+
+### `/mesaj` — the same broadcast, from inside Discord
+
+`/mesaj metin:<text>` posts one message into every linked channel this app
+maintains, through the same sender the web app uses (lobby first, bot as the
+fallback), and replies privately with one line per channel so a partial delivery
+is visible instead of silent:
+
+```
+✅ Sent to all 2 linked channels.
+
+• #genel — via the game lobby
+• #klipler — via the bot (the member who linked this server has no stored Discord connection)
+```
+
+Three details of how it behaves, all of them from bugs this project already hit:
+
+- **It acknowledges before it works.** `deferReply({ flags: Ephemeral })` is the
+  first thing it does, because a broadcast across servers takes seconds and
+  Discord invalidates the interaction token after 3. Ephemerality is fixed there,
+  so the later `editReply` must not repeat the flag.
+- **It is rate-limited per member** (`consumeCommandQuota`, 5 per minute, keyed
+  `cmd-msg-rate:<userId>`) — the same window as the web app's, in its own
+  namespace, because one invocation reaches every server the app is in.
+- **The behaviour lives in `src/utils/mesaj-command.ts`**, not in the command
+  file. The framework discovers commands by importing everything in
+  `src/commands/`, so a command imported by an API endpoint or a diagnostic is
+  emitted twice and Discord rejects the whole `PUT` — which is exactly how
+  `/authorize` was once registered twice, with the reason only in the build log.
+  `src/commands/mesaj.ts` is the declaration; the handler is a factory with
+  injectable collaborators, so `src/utils/mesaj-command.test.ts` drives it.
 
 ### Lobby first, bot as the safety net
 
@@ -372,7 +418,7 @@ lobby, 1 from the app's bot`).
 | Request | Answer |
 | --- | --- |
 | `GET /api/message` | `{ ok, total, channels: [{ guildId, channelId, name }] }` — where a message would go, names resolved with the bot token |
-| `POST /api/message` `{ name, text }` | `{ ok, sent, total, results: [{ channelId, ok, messageId \| error }] }` |
+| `POST /api/message` `{ text }` | `{ ok, sent, total, results: [{ channelId, ok, delivery, messageId \| error }] }` |
 
 Rules, and why each exists:
 
@@ -388,10 +434,10 @@ Rules, and why each exists:
   to form a mention token instead: `@everyone` → `@\u200beveryone`,
   `<@123>` → `<@\u200b123>` (`src/utils/mentions.ts`). A stranger can never ping a
   server from this page, whichever path is used.
-- **The name is escaped and the body is quoted.** The attribution is the app's own
-  markdown (`💬 **<name>** — sent from the web app`), so markdown metacharacters
-  in the *name* are escaped and the *body* is rendered as a quote — neither can
-  forge a second speaker inside the app's formatting.
+- **The text is posted as written, with nothing wrapped around it.** The endpoint
+  adds no attribution and no formatting of its own — what the sender typed is what
+  every channel receives (`src/utils/web-message.ts`), which is also why a name in
+  the request body is ignored rather than rendered.
 - **A partial delivery is reported as one.** Every channel's own result is
   returned, so a server the bot cannot post in shows `❌ 403` for that channel
   instead of being indistinguishable from success.
@@ -402,44 +448,60 @@ deauthorize notice has, and it is why the page posts with the bot token rather
 than a user token — a visitor needs no Discord account, and no lobby has to be
 alive.
 
-### The Activity (`/activity`)
+### The Activity (`/activity`) — “Dog Run”
 
-The same "send to every linked channel" experience, as a **Discord Activity** —
-the frame you launch from a server's Activity list, where the Discord client has
-already authenticated the member. `public/activity.js` is the client and
-`api/activity.ts` the server half; `api/index.ts` serves the page, because an
-Activity's URL mapping is a **prefix → target** pair and the one that keeps
-everything reachable is `/` → the deployment root.
+The frame you launch from a server's Activity list is a game: an endless runner
+in the spirit of Chrome's offline dino, with a **white dog** in place of the dino,
+fire hydrants to jump and frisbees to duck. `public/dog-runner.js` is the whole
+game — no assets, no build step, drawn with canvas paths — `public/activity.js`
+is the Activity's client, and `api/activity.ts` its server half. `api/index.ts`
+serves the page, because an Activity's URL mapping is a **prefix → target** pair
+and the one that keeps everything reachable is `/` → the deployment root.
 
 | Route | What it is |
 | --- | --- |
-| `/activity` | The page. Open it in a browser and it explains that it is an Activity; inside Discord it runs. |
-| `/activity.js` | The client: SDK handshake, authorization, then `GET`/`POST /api/message`. |
+| `/activity` | The page. Open it in a browser and the game plays there too; inside Discord it also knows who you are. |
+| `/activity.js` | The client: starts the game, then identifies the player in the background. |
+| `/dog-runner.js` | The game: rules, physics, rendering, input. |
 | `/vendor/embedded-app-sdk/…` | The `@discord/embedded-app-sdk` browser build, vendored (`npm run activity-vendor`) |
 | `GET /api/activity` | `{ clientId, scopes, tokenExchange, missing }` — what the page needs to start |
 | `POST /api/activity` `{ code }` | Exchanges the frame's one-time code for an access token |
 
-How it starts, in order: `GET /api/activity` → `sdk.ready()` (this is also what
-tells Discord the frame loaded) → `sdk.commands.authorize` (Discord's own consent
-modal) → `POST /api/activity` → `sdk.commands.authenticate`. Only then does it
-read and post messages. Three decisions worth knowing:
+Controls: **Space / ↑ / tap** to jump, **↓** to duck. High frisbees need nothing.
+The speed rises with the score and the *time* between obstacles shrinks, so the
+run gets harder in the way it claims to. The record is per Discord account.
+
+Order of events: the **game starts first and unconditionally**; then, in the
+background, `GET /api/activity` → `sdk.ready()` (which is also what tells Discord
+the frame has loaded) → `sdk.commands.authorize` (Discord's own consent) →
+`POST /api/activity` → `sdk.commands.authenticate`, whose answer keys the high
+score. Authorization is **best effort**: if any step fails, the failure is one
+line of text next to a game that still plays. Three decisions worth knowing:
 
 - **The secret never reaches the browser.** `authorize` returns a one-time
   `code`; the exchange that turns it into a token needs `DISCORD_CLIENT_SECRET`,
   so it happens on the server. The Activity asks only for `identify` and
   `guilds` — **not** `sdk.social_layer`, which is limited access and would fail
   the whole authorization on an app that has not been accepted into Discord's
-  Social SDK program, even though every linked channel would still work. Delivery
-  does not use the Activity's token at all: it goes through the same
-  `sendToLinkedChannels` path as the web app, with each server's own stored
-  member connection.
+  Social SDK program. Nothing here needs that scope: the game only uses the
+  identity, and sending a message does not use the Activity's token at all (see
+  `/mesaj` and the web app, which go through `sendToLinkedChannels`).
 - **It is never a blank frame.** A Discord Activity has no console, no address
   bar and no error output: a missing page or asset is a white rectangle. So the
   shell ships a visible starting state plus a fallback that names the fix, every
   failure writes a readable line into `#status`, `sdk.ready()` is bounded by a
   timeout (nothing answers `postMessage` outside Discord), and
-  `src/utils/activity-page.test.ts` walks the page's assets *and* the vendored
-  SDK's whole module graph to prove every file they reference exists.
+  `src/utils/activity-page.test.ts` walks the page's assets *and* the client's
+  whole module graph — the game and the vendored SDK — to prove every file they
+  import exists.
+- **The game is tested without a browser.** `src/utils/dog-runner.test.ts` checks
+  the rules directly (a hydrant must be jumped, a mid frisbee ducked, a high one
+  ignored; spacing tightens with speed; a graze survives) and
+  `src/utils/dog-runner-engine.test.ts` runs the real loop against a fake canvas
+  and a fake `requestAnimationFrame` — frames, a jump, a collision, game over, a
+  restart, ducking, a tap, pause-on-blur and teardown. Rules that are right and a
+  renderer that throws still mean a blank Activity, and that is the one failure
+  nobody can debug from inside Discord.
 - **The SDK is served from our own origin**, not a CDN: Discord applies its own
   Content-Security-Policy to the frame, and depending on a third-party host being
   allowed has no upside for 460 KB of static ESM. `public/vendor/` is committed,
@@ -466,8 +528,10 @@ mapping the root is what lets the frame reach `/activity.js`, `/vendor/…` and
 - **"This page is a Discord Activity"** inside Discord — the frame reached the
   page but not as an Activity (no `frame_id`/`instance_id`).
 
-You can verify most of it without Discord: `/activity` must return the page,
-`/activity.js` and `/vendor/embedded-app-sdk/index.mjs` must return JavaScript,
+You can verify most of it without Discord: `/activity` must return the page — and
+**the game plays there**, in a plain browser tab, which is the quickest way to
+see that the frame, its assets and the loop are all fine. `/activity.js`,
+`/dog-runner.js` and `/vendor/embedded-app-sdk/index.mjs` must return JavaScript,
 and `GET /api/activity` must report a `clientId` with `tokenExchange: true`.
 
 ### Package version note
